@@ -1,0 +1,32 @@
+@'
+# venv / IDE / caches
+.venv/
+.env
+*.pyc
+__pycache__/
+.pytest_cache/
+.ipynb_checkpoints/
+.vscode/
+.idea/
+
+# local outputs & logs
+artifacts/
+data/raw/
+data/processed/
+data/indices/
+notebooks/
+outputs/
+logs/
+
+# model + big files
+*.safetensors
+*.bin
+*.pt
+*.onnx
+models/
+checkpoints/
+
+# OS noise
+.DS_Store
+Thumbs.db
+'@ | Out-File -Encoding utf8 .gitignore

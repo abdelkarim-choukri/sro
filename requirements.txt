@@ -1,0 +1,14 @@
+torch>=2.1
+transformers>=4.41
+sentence-transformers>=2.5
+faiss-cpu>=1.7
+pyserini>=0.22.0
+numpy>=1.26
+pandas>=2.2
+scikit-learn>=1.4
+PyYAML>=6.0
+pydantic>=2.8
+tqdm>=4.66
+ujson>=5.9
+rich>=13.7
+pytest>=8.2

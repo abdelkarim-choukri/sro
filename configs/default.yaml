@@ -1,0 +1,15 @@
+# configs/default.yaml
+sro_prover:
+  M: 8
+  L: 24
+  B: 64
+  tau1: 0.75
+  tau2: 0.80
+  delta: 0.10
+  kappa: 0.05
+  epsilon: 0.02
+  max_sentences_per_claim: 64
+paths:
+  artifacts_dir: artifacts
+  proofs_dir: artifacts/proofs
+  logs_dir: artifacts/logs
