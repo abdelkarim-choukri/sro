@@ -20,6 +20,7 @@ Notes:
 - For speed: keep batch_size in [16, 32] depending on GPU memory.
 """
 
+# sro/nli/nli_infer.py
 from __future__ import annotations
 import os
 from typing import Iterable, List, Sequence, Tuple, Optional
@@ -27,31 +28,27 @@ from typing import Iterable, List, Sequence, Tuple, Optional
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-
 _DEFAULT_MODEL = os.getenv("SRO_NLI_MODEL", "roberta-large-mnli")
+_CACHE_DIR = os.getenv("SRO_CACHE_DIR", "models_cache")  # local HuggingFace cache dir
 _MAX_LEN = 512
 
-
 class _NLIBackend:
-    """
-    Internal singleton that holds model & tokenizer and exposes batched scoring.
-    """
+    """Internal singleton that holds model & tokenizer and exposes batched scoring."""
     _instance: Optional["_NLIBackend"] = None
 
     def __init__(self, model_name: str = _DEFAULT_MODEL):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         try:
-            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-            self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=_CACHE_DIR)
+            self.model = AutoModelForSequenceClassification.from_pretrained(model_name, cache_dir=_CACHE_DIR)
         except Exception as e:
             raise RuntimeError(f"Failed to load NLI model '{model_name}': {e}") from e
 
         self.model.to(self.device)
         self.model.eval()
 
-        # Figure out label mapping robustly
+        # Robust label mapping
         label2id = getattr(self.model.config, "label2id", None) or {}
-        # Normalize keys to lowercase for safety
         self._id_ent = None
         self._id_contra = None
         for k, v in label2id.items():
@@ -61,17 +58,16 @@ class _NLIBackend:
             elif "contrad" in kl:
                 self._id_contra = int(v)
 
-        # Fallback to common order for MNLI heads: [contradiction, neutral, entailment]
+        # Fallback to common MNLI order [contradiction, neutral, entailment]
         if self._id_ent is None or self._id_contra is None:
             num_labels = int(getattr(self.model.config, "num_labels", 3))
             if num_labels == 3:
-                # roberta-large-mnli uses 0=contradiction, 1=neutral, 2=entailment
                 self._id_contra = 0 if self._id_contra is None else self._id_contra
                 self._id_ent = 2 if self._id_ent is None else self._id_ent
             else:
                 raise RuntimeError(
                     f"Cannot infer entail/contradiction label ids (num_labels={num_labels}). "
-                    f"Please set SRO_NLI_MODEL to an MNLI-compatible head."
+                    f"Set SRO_NLI_MODEL to an MNLI-compatible head."
                 )
 
     @classmethod
@@ -87,11 +83,7 @@ class _NLIBackend:
         hypotheses: Sequence[str],
         batch_size: int = 16,
     ) -> Tuple[List[float], List[float]]:
-        """
-        Returns:
-          p_entail: prob. entailment per example
-          p_contra: prob. contradiction per example
-        """
+        """Return (p_entail, p_contradict) for each (premise, hypothesis)."""
         if len(premises) != len(hypotheses):
             raise ValueError("premises and hypotheses must have same length")
 
@@ -110,7 +102,7 @@ class _NLIBackend:
             )
             enc = {k: v.to(self.device) for k, v in enc.items()}
             logits = self.model(**enc).logits  # [B, num_labels]
-            probs = torch.softmax(logits, dim=-1)  # [B, num_labels]
+            probs = torch.softmax(logits, dim=-1)
 
             p_entail.append(probs[:, self._id_ent].detach().float().cpu())
             p_contra.append(probs[:, self._id_contra].detach().float().cpu())
@@ -126,15 +118,10 @@ class _NLIBackend:
         p_contra = [float(min(1.0, max(0.0, x))) for x in p_contra]
         return p_entail, p_contra
 
-
 # ---------- Public API ----------
 
 def one_hop_scores(claim: str, sentences: Sequence[str], batch_size: int = 16) -> Tuple[List[float], List[float]]:
-    """
-    Return per-sentence:
-      p1: entailment probability for (premise=sentence, hypothesis=claim)
-      c1: contradiction probability for the same pair
-    """
+    """Per sentence: p1 (entail) and c1 (contradict) for (sentence -> claim)."""
     if not sentences:
         return [], []
     be = _NLIBackend.get()
@@ -143,7 +130,6 @@ def one_hop_scores(claim: str, sentences: Sequence[str], batch_size: int = 16) -
     p_ent, p_contra = be.score_pairs(prem, hyp, batch_size=batch_size)
     return p_ent, p_contra
 
-
 def two_hop_scores(
     claim: str,
     pairs: Sequence[Tuple[str, str]],
@@ -151,12 +137,7 @@ def two_hop_scores(
     batch_size: int = 16,
 ) -> List[float]:
     """
-    Return p2 (entailment probability) for each pair (sent_i, sent_j):
-
-      premise = sent_i + sep + sent_j
-      hypothesis = claim
-
-    We only return p_entail for two-hop; contradiction is handled via one-hop Cmax.
+    For each pair (sent_i, sent_j), compute p2 entail for ((sent_i + SEP + sent_j) -> claim).
     """
     if not pairs:
         return []

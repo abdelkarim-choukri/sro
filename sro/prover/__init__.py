@@ -1,13 +1,15 @@
 """
-SROProver — now with single alternation + JSONL proof logging.
+SROProver — single alternation + JSONL proof logging.
 """
 
 from __future__ import annotations
-from typing import List, Optional, Tuple, Callable, Iterable
+from typing import List, Optional, Dict, Tuple, Callable
+from dataclasses import asdict, is_dataclass
+from pathlib import Path
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
-from sro.types import SentenceCandidate, Claim, ProofEdge, ProofObject, ProverResult
+from sro.types import SentenceCandidate, Claim, ProofObject, ProverResult, Edge
 from sro.config import Config, load_config
 from sro.prover.s1_onehop import one_hop_scores as s1_one_hop
 from sro.prover.s2_frontier import select_frontier_and_pool, _tokens as s2_tokens
@@ -26,6 +28,7 @@ except Exception:
 
 
 class _TwoHopNLIScorer(TwoHopScorer):
+    """Thin adapter to real 2-hop NLI scorer."""
     def __init__(self, claim_text: str, cand_texts: List[str], batch_size: int = 16):
         self.claim_text = claim_text
         self.cand_texts = cand_texts
@@ -60,7 +63,6 @@ def _default_fetch_more(claim: str, candidates: List[SentenceCandidate], **_: ob
             ce_score=0.82,
         ))
     else:
-        # Generic (weak) fallback
         extras.append(SentenceCandidate(
             sent_id="alt_generic",
             text=f"Reports indicate: {claim}",
@@ -70,10 +72,19 @@ def _default_fetch_more(claim: str, candidates: List[SentenceCandidate], **_: ob
     return extras
 
 
-from dataclasses import asdict, is_dataclass
-from pathlib import Path
-import json
-from datetime import datetime
+def _citation_dicts_from_leaves(leaves: List[str],
+                                candidates: List[SentenceCandidate]) -> List[Dict[str, str]]:
+    """
+    Build [{'sent_id': str, 'source_id': str}, ...] for the given leaf IDs.
+    If a leaf ID is not found, return the ID with empty source_id to keep schema stable.
+    """
+    idx_by_id = {c.sent_id: c for c in candidates}
+    cites: List[Dict[str, str]] = []
+    for sid in leaves:
+        c = idx_by_id.get(sid)
+        cites.append({"sent_id": sid, "source_id": (c.source_id if c else "")})
+    return cites
+
 
 def _log_proof(cfg: Config, proof: ProofObject, status: str = "ACCEPT") -> None:
     """
@@ -89,7 +100,6 @@ def _log_proof(cfg: Config, proof: ProofObject, status: str = "ACCEPT") -> None:
         if is_dataclass(proof):
             payload = asdict(proof)
         else:
-            # Fallback — minimal but valid JSON
             payload = {
                 "claim_id": getattr(proof, "claim_id", None),
                 "leaves": getattr(proof, "leaves", None),
@@ -101,7 +111,7 @@ def _log_proof(cfg: Config, proof: ProofObject, status: str = "ACCEPT") -> None:
             }
 
         record = {
-            "ts": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "status": status,
             "proof": payload,
         }
@@ -134,16 +144,18 @@ class SROProver:
         M, L, B = int(knobs.M), int(knobs.L), int(knobs.B)
         tau1, tau2, delta, kappa, eps = float(knobs.tau1), float(knobs.tau2), float(knobs.delta), float(knobs.kappa), float(knobs.epsilon)
 
-        # ---------- First pass ----------
+        # ---------- S1: one-hop ----------
         p1, c1 = s1_one_hop(claim.text, candidates, use_model=self.use_real_nli, batch_size=self.batch_size)
         Cmax = max(c1) if c1 else 0.0
         best1_idx = max(range(len(p1)), key=lambda i: p1[i]) if p1 else -1
         best1_score = p1[best1_idx] if best1_idx >= 0 else 0.0
 
+        # ---------- S2–S3: frontier, pool, features ----------
         frontier_idx, pool2_idx, token_cache = select_frontier_and_pool(candidates, p1, M=M, L=L, lambda_diversity=0.7)
         claim_tokens = list(s2_tokens(claim.text))
         pairs, feats = build_pair_features(claim_tokens, candidates, token_cache, frontier_idx, pool2_idx, p1)
 
+        # ---------- S4–S5: UB + bounded search ----------
         scorer = _TwoHopNLIScorer(claim.text, [c.text for c in candidates], batch_size=self.batch_size) \
                  if (self.use_real_nli and nli_two_hop is not None) else None
 
@@ -155,7 +167,7 @@ class SROProver:
             batch_size=self.batch_size,
         )
 
-        # Choose (first pass)
+        # ---------- Choose (first pass) ----------
         choice: Optional[Tuple[str, object]] = None
         score_star = 0.0
         if best_pair is not None and best_p2 >= tau2:
@@ -168,23 +180,29 @@ class SROProver:
             choice = ("1hop", best1_idx)
             score_star = float(best1_score)
 
-        # If we already have a choice, run safety + ship/abstain
+        # ---------- S7: Safety + ship ----------
         if choice is not None:
             ok_safe, _ = safe_to_ship(score_star, Cmax, delta)
             if not ok_safe:
                 return ProverResult(status="REJECT", reason="CONTRADICTION_BLOCK")
-            proof = self._build_proof(choice, claim, candidates, p1, c1, score_star, Cmax, stop_reason, alternation_used=False)
+            acc_reason = "2hop@tau2" if choice[0] == "2hop" else "1hop@tau1"
+            proof = self._build_proof(
+                choice, claim, candidates, p1, c1,
+                score_star, Cmax, stop_reason,
+                alternation_used=False,
+                accept_reason=acc_reason,
+                budget_used=evals,
+                ub_top_remaining=top_ub_rem,
+            )
             _log_proof(self.cfg, proof, status="ACCEPT")
             return ProverResult(status="ACCEPT", proof=proof)
-
-        # ---------- Alternation gate ----------
+        # ---------- S8: Alternation gate ----------
         best_so_far = max(best1_score, best_p2)
         budget_left = max(0, B - evals)
         if fetch_more is None:
             fetch_more = _default_fetch_more
 
         if should_alternate(best_so_far, top_ub_rem, tau2, eps, budget_left):
-            # Get a few extra targeted sentences
             extra = fetch_more(
                 claim=claim.text,
                 candidates=candidates,
@@ -193,19 +211,20 @@ class SROProver:
                 p1=p1,
                 top_ub=top_ub_rem,
             ) or []
-            # Merge (de-dup by sent_id)
+
             existing_ids = {c.sent_id for c in candidates}
             extra = [e for e in extra if e.sent_id not in existing_ids]
+
             if extra:
                 candidates2 = candidates + extra
-                # Re-run S1–S5 once with remaining budget
                 p1b, c1b = s1_one_hop(claim.text, candidates2, use_model=self.use_real_nli, batch_size=self.batch_size)
                 Cmax_b = max(c1b) if c1b else 0.0
                 frontier2, pool22, token_cache2 = select_frontier_and_pool(candidates2, p1b, M=M, L=L, lambda_diversity=0.7)
                 claim_tokens2 = list(s2_tokens(claim.text))
                 pairs2, feats2 = build_pair_features(claim_tokens2, candidates2, token_cache2, frontier2, pool22, p1b)
                 scorer2 = _TwoHopNLIScorer(claim.text, [c.text for c in candidates2], batch_size=self.batch_size) \
-                          if (self.use_real_nli and nli_two_hop is not None) else None
+                            if (self.use_real_nli and nli_two_hop is not None) else None
+
                 best_pair2, best_p22, evals2, stop_reason2, _ = bounded_search(
                     claim.text, candidates2, pairs2, feats2,
                     p1=p1b, tau1=tau1, B=budget_left, kappa=kappa,
@@ -214,7 +233,6 @@ class SROProver:
                     batch_size=self.batch_size,
                 )
 
-                # Decide after alternation
                 choice2: Optional[Tuple[str, object]] = None
                 score_star2 = 0.0
                 if best_pair2 is not None and best_p22 >= tau2:
@@ -223,7 +241,7 @@ class SROProver:
                     if ok_min:
                         choice2 = ("2hop", (i, j))
                         score_star2 = float(best_p22)
-                # Always allow 1-hop fallback on second pass
+
                 best1_idx2 = max(range(len(p1b)), key=lambda i: p1b[i]) if p1b else -1
                 best1_score2 = p1b[best1_idx2] if best1_idx2 >= 0 else 0.0
                 if choice2 is None and best1_score2 >= tau1:
@@ -234,13 +252,22 @@ class SROProver:
                     ok_safe, _ = safe_to_ship(score_star2, Cmax_b, delta)
                     if not ok_safe:
                         return ProverResult(status="REJECT", reason="CONTRADICTION_BLOCK")
-                    proof = self._build_proof(choice2, claim, candidates2, p1b, c1b, score_star2, Cmax_b, stop_reason2, alternation_used=True)
+
+                    acc_reason = "2hop@tau2" if choice2[0] == "2hop" else "1hop@tau1"
+                    proof = self._build_proof(
+                        choice2, claim, candidates2, p1b, c1b,
+                        score_star2, Cmax_b, stop_reason2,
+                        alternation_used=True,
+                        accept_reason=acc_reason,
+                        budget_used=evals + evals2,
+                        ub_top_remaining=0.0,
+                    )
                     _log_proof(self.cfg, proof, status="ACCEPT")
                     return ProverResult(status="ACCEPT", proof=proof)
 
-        # If we get here, no proof after alternation
+        # ---- ALWAYS return a ProverResult if we didn't accept above ----
         return ProverResult(status="REJECT", reason="NO_PROOF")
-
+       
     # ---------- helpers ----------
 
     def _build_proof(
@@ -253,44 +280,65 @@ class SROProver:
         score_star: float,
         Cmax: float,
         stop_reason: str,
-        alternation_used: bool,
+        *,
+        alternation_used: bool = False,
+        accept_reason: str = "",
+        budget_used: int = 0,
+        ub_top_remaining: float = 0.0,
     ) -> ProofObject:
-        if choice[0] == "1hop":
-            idx = int(choice[1])
-            edges = [ProofEdge(
-                src=(candidates[idx].sent_id,),
+        """
+        Construct a ProofObject with standardized dict citations.
+        - For 1-hop: leaves = [sent_id_i]; edge = ((si,), claim_id, 'entail', p1[i], c1[i])
+        - For 2-hop: leaves = [si, sj]; edge = ((si, sj), claim_id, 'entail', p2, max(c1[i], c1[j]))
+        """
+        kind, payload = choice
+        if kind == "1hop":
+            i = int(payload)
+            if not (0 <= i < len(candidates)) or not (0 <= i < len(p1)) or not (0 <= i < len(c1)):
+                raise IndexError(f"_build_proof: 1hop index {i} out of range")
+            sid = candidates[i].sent_id
+            leaves = [sid]
+            edge = Edge(
+                src=(sid,),
                 dst=claim.claim_id,
                 label="entail",
-                p_entail=p1[idx],
-                p_contradict=c1[idx],
-                model="mnli-1hop" if self.use_real_nli else "heuristic-1hop-stub",
-            )]
-            leaves = [candidates[idx].sent_id]
-            citations = [{"sent_id": candidates[idx].sent_id, "source_id": candidates[idx].source_id}]
+                p_entail=float(p1[i]),
+                p_contradict=float(c1[i]),
+            )
+        elif kind == "2hop":
+            i, j = payload
+            i = int(i); j = int(j)
+            if not (0 <= i < len(candidates) and 0 <= j < len(candidates)):
+                raise IndexError(f"_build_proof: 2hop indices {(i,j)} out of range")
+            if not (0 <= i < len(c1) and 0 <= j < len(c1)):
+                raise IndexError(f"_build_proof: c1 indices {(i,j)} out of range")
+            sid_i = candidates[i].sent_id
+            sid_j = candidates[j].sent_id
+            leaves = [sid_i, sid_j]
+            edge = Edge(
+                src=(sid_i, sid_j),
+                dst=claim.claim_id,
+                label="entail",
+                p_entail=float(score_star),
+                p_contradict=float(max(c1[i], c1[j])),
+            )
         else:
-            i, j = choice[1]
-            edges = [ProofEdge(
-                src=(candidates[i].sent_id, candidates[j].sent_id),
-                dst=claim.claim_id,
-                label="entail",
-                p_entail=score_star,
-                p_contradict=max(c1[i], c1[j]),
-                model="mnli-2hop" if self.use_real_nli else "heuristic-2hop-stub",
-            )]
-            leaves = [candidates[i].sent_id, candidates[j].sent_id]
-            citations = [
-                {"sent_id": candidates[i].sent_id, "source_id": candidates[i].source_id},
-                {"sent_id": candidates[j].sent_id, "source_id": candidates[j].source_id},
-            ]
+            raise ValueError(f"_build_proof: unknown choice kind '{kind}'")
+
+        citations = _citation_dicts_from_leaves(leaves, candidates)
+        margin = float(score_star) - float(Cmax)
 
         return ProofObject(
             claim_id=claim.claim_id,
             leaves=leaves,
-            edges=edges,
+            edges=[edge],
             citations=citations,
-            score=score_star,
-            cmax=Cmax,
-            margin=score_star - Cmax,
-            stop_reason=stop_reason,
-            alternation_used=alternation_used,
+            score=float(score_star),
+            cmax=float(Cmax),
+            margin=margin,
+            stop_reason=str(stop_reason),
+            alternation_used=bool(alternation_used),
+            accept_reason=str(accept_reason),
+            budget_used=int(budget_used),
+            ub_top_remaining=float(ub_top_remaining),
         )

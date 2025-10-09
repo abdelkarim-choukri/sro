@@ -16,7 +16,7 @@ class SROProverCfg(BaseModel):
     kappa: float = 0.05 # optimism cushion in UB
     epsilon: float = 0.02 # alternation slack
 
-    max_sentences_per_claim: PositiveInt = 64
+    max_sentences_per_claim: PositiveInt = 64   
 
     model_config = ConfigDict(extra="ignore")
 
@@ -37,7 +37,7 @@ class SROProverCfg(BaseModel):
             raise ValueError("L must be <= max_sentences_per_claim")
         # Optional: enforce disjoint frontier/second pool budget
         # if self.M + self.L > self.max_sentences_per_claim:
-        #     raise ValueError("M + L must be <= max_sentences_per_claim")
+        # raise ValueError("M + L must be <= max_sentences_per_claim")
         return self
 
 class PathsCfg(BaseModel):
@@ -52,9 +52,64 @@ class PathsCfg(BaseModel):
         self.proofs_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
 
+class RetrievalCfg(BaseModel):
+    # corpus_jsonl: path to corpus JSONL file (one JSON object per line with fields: source_id, text).
+    corpus_jsonl: Path = Path("data/corpus/corpus.jsonl")
+    k_bm25: PositiveInt = 200
+    k_dense: PositiveInt = 200
+    k_fused: PositiveInt = 24          # how many sentences we keep after RRF+MMR
+    mmr_lambda: float = 0.7            # MMR tradeoff λ (relevance vs redundancy)
+    rrf_c: PositiveInt = 60            # RRF constant
+    use_cross_encoder: bool = True     # try CE rerank; fallback if it fails
+    rerank_top: PositiveInt = 64       # only top-K go to CE
+
+    model_config = ConfigDict(extra="ignore")
+
+    @field_validator("mmr_lambda")
+    @classmethod
+    def _lambda01(cls, v: float) -> float:
+        if not (0.0 <= v <= 1.0):
+            raise ValueError("mmr_lambda must be in [0,1]")
+        return float(v)
+
+class ClaimsCfg(BaseModel):
+    # K: max number of claims we attempt to prove
+    K: PositiveInt = 3
+    # ψ (psi): min cosine similarity between question and sentence to consider it a claim
+    min_question_cosine: float = 0.30
+    # H: regex words that indicate hedging / speculation → drop
+    hedge_terms: list[str] = [
+        r"\brumor(s|ed)?\b",
+        r"\breportedly\b",
+        r"\bmay\b",
+        r"\bmight\b",
+        r"\bpossibly\b",
+        r"\bsuggest(ed|s|ing)?\b",
+        r"\baccording to (sources|rumors)\b",
+    ]
+    # w_src: per-source head weight (prefix before ':'); defaults to 1.0 if not present
+    reliability_weights: Dict[str, float] = {
+        "news": 1.00,
+        "press": 0.95,
+        "blog": 0.60,
+        "seed": 0.80,
+        "alt": 0.75,
+    }
+
+    model_config = ConfigDict(extra="ignore")
+
+    @field_validator("min_question_cosine")
+    @classmethod
+    def _psi01(cls, v: float) -> float:
+        if not (0.0 <= v <= 1.0):
+            raise ValueError("min_question_cosine must be in [0,1]")
+        return float(v)
+
 class Config(BaseModel):
     sro_prover: SROProverCfg = SROProverCfg()
     paths: PathsCfg = PathsCfg()
+    retrieval: RetrievalCfg = RetrievalCfg()
+    claims: ClaimsCfg = ClaimsCfg()          # <-- NEW
     model_config = ConfigDict(extra="ignore")
 
 # --- Back-compat for flat YAML ---
@@ -66,11 +121,11 @@ def _normalize_data(data: Dict[str, Any]) -> Dict[str, Any]:
     if not data:
         return {}
     data = dict(data)
-    if "sro_prover" in data and isinstance(data["sro_prover"], dict):
-        return data
+    # existing flat → sro_prover migration
     flat = {k: data.pop(k) for k in list(data.keys()) if k in _FLAT_KEYS}
     if flat:
-        data["sro_prover"] = flat
+        data.setdefault("sro_prover", {}).update(flat)
+    # allow users to omit retrieval; defaults will fill
     return data
 
 def load_config(path: Optional[str] = "configs/default.yaml") -> Config:
@@ -84,8 +139,8 @@ def load_config(path: Optional[str] = "configs/default.yaml") -> Config:
             except yaml.YAMLError as e:
                 raise RuntimeError(f"Failed to parse YAML at {path}: {e}") from e
     data = _normalize_data(data)
-    print('data',data)
     cfg = Config(**data)
-    print('cfg',cfg)
+    
     cfg.paths.ensure()
     return cfg
+

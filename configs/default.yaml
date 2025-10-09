@@ -1,4 +1,3 @@
-# configs/default.yaml
 sro_prover:
   M: 8
   L: 24
@@ -13,3 +12,30 @@ paths:
   artifacts_dir: artifacts
   proofs_dir: artifacts/proofs
   logs_dir: artifacts/logs
+retrieval:
+  corpus_jsonl: data/corpus/corpus.jsonl
+  k_bm25: 200
+  k_dense: 200
+  k_fused: 24
+  mmr_lambda: 0.7
+  rrf_c: 60
+  use_cross_encoder: true
+  rerank_top: 64
+claims:
+  K: 3
+  min_question_cosine: 0.30
+  hedge_terms:
+    - "\\brumor(s|ed)?\\b"
+    - "\\breportedly\\b"
+    - "\\bmay\\b"
+    - "\\bmight\\b"
+    - "\\bpossibly\\b"
+    - "\\bsuggest(ed|s|ing)?\\b"
+    - "\\baccording to (sources|rumors)\\b"
+  reliability_weights:
+    news: 1.0
+    press: 0.95
+    blog: 0.60
+    seed: 0.80
+    alt: 0.75
+
