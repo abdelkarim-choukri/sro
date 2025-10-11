@@ -19,6 +19,7 @@ outputs/
 logs/
 
 # model + big files
+models_cache/
 *.safetensors
 *.bin
 *.pt
@@ -26,8 +27,10 @@ logs/
 models/
 checkpoints/
 
+# local temp
+tmp_*.py
+
 # OS noise
 .DS_Store
 Thumbs.db
-'@ | Out-File -Encoding utf8 .gitignore
-models_cache/
+'@ | Set-Content -Encoding utf8 .gitignore
