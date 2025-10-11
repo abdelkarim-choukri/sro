@@ -1,0 +1,19 @@
+# Default: normalize to LF everywhere
+* text=auto eol=lf
+
+# Windows-only scripts that prefer CRLF
+*.ps1  text eol=crlf
+*.bat  text eol=crlf
+
+# Common text files (force LF to keep Actions YAML happy)
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.md   text eol=lf
+*.py   text eol=lf
+*.json text eol=lf
+*.csv  text eol=lf
+
+# Binary
+*.png  binary
+*.jpg  binary
+*.pdf  binary

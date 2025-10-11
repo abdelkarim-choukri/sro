@@ -1,170 +1,125 @@
+# sro/claims/splitter.py
 from __future__ import annotations
-from typing import List, Tuple, Set, Dict, Optional
+from typing import List, Set
 import re
-import math
-import numpy as np
-from sentence_transformers import SentenceTransformer
+import os
 
-from sro.types import Claim, SentenceCandidate
+from sro.types import Claim
+__all__ = ["split", "split_into_claims", "draft_and_claims"]
 
-_WORD_RE = re.compile(r"[A-Za-z0-9]+")
+_DEFAULT_MAX_TOKENS = int(os.getenv("SRO_SPLIT_MAX_TOKENS", "25"))  # max tokens per claim
+_MIN_TOKENS = int(os.getenv("SRO_SPLIT_MIN_TOKENS", "4"))           # drop ultra-short
 
-def _tokens(s: str) -> Set[str]:
-    return set(t.lower() for t in _WORD_RE.findall(s or ""))
+_WORD = re.compile(r"[A-Za-z0-9]+")
+_SENT_SPLIT = re.compile(r"(?<=[.?!])\s+")  # naive sentence split
 
-def _jaccard(a: Set[str], b: Set[str]) -> float:
-    if not a and not b:
-        return 0.0
-    inter = len(a & b)
-    union = len(a | b)
-    return inter / union if union else 0.0
+_STOPWORDS = {
+    "a","an","the","this","that","these","those","of","to","for","in","on","at","by","from","with",
+    "and","or","but","as","is","are","was","were","be","been","being","it","its","their","his","her",
+    "they","them","we","you","i","he","she","there","here","over","under","into","out","about","up","down"
+}
 
-def _source_prefix(source_id: str) -> str:
-    # "news:1" -> "news"; "press:1" -> "press"
-    return (source_id or "").split(":", 1)[0] if source_id else ""
+_VERB_LIKE = {
+    "is","are","was","were","be","been","being",
+    "has","have","had",
+    "include","includes","included","including",
+    "feature","features","featured","featuring",
+    "support","supports","supported","supporting",
+    "introduce","introduces","introduced","introducing",
+    "announce","announces","announced","announcing",
+    "release","releases","released","releasing",
+    "launch","launches","launched","launching",
+    "confirm","confirms","confirmed","confirming",
+    "say","says","said","stated","state","states","claim","claims","claimed"
+}
 
-class _STEmbedder:
-    """Singleton-ish mini wrapper to avoid reloading the encoder."""
-    _model = None
-    @classmethod
-    def encode(cls, texts: List[str]) -> np.ndarray:
-        if cls._model is None:
-            # small and fast; matches retrieval model family
-            self._dense_model = SentenceTransformer(model_name, cache_folder="models_cache")
+def _tokens(text: str) -> List[str]:
+    return [t.lower() for t in _WORD.findall(text or "")]
 
-        return cls._model.encode(texts, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False, batch_size=64)
+def _norm(text: str) -> str:
+    return " ".join(_tokens(text))
 
-def _cosine(a: np.ndarray, b: np.ndarray) -> float:
-    # vectors are already normalized; robust fallback
-    num = float((a * b).sum())
-    return max(-1.0, min(1.0, num))
+def _has_verb(tokens: List[str]) -> bool:
+    for t in tokens:
+        if t in _VERB_LIKE:
+            return True
+        if len(t) >= 4 and t not in _STOPWORDS and (t.endswith("ed") or t.endswith("ing")):
+            return True
+    return False
 
-def _is_hedged(text: str, hedge_patterns: List[re.Pattern]) -> bool:
-    low = (text or "").lower()
-    return any(p.search(low) is not None for p in hedge_patterns)
-
-def pick_top_sentences(
-    question: str,
-    cands: List[SentenceCandidate],
-    *,
-    K: int,
-    min_question_cosine: float,
-    hedge_terms: List[str],
-    reliability_weights: Dict[str, float],
-    max_sim: float = 0.85,
-) -> List[SentenceCandidate]:
-    """
-    Select up to K sentences using:
-      - hedge filter (drop speculative sentences),
-      - question–sentence cosine ≥ min_question_cosine,
-      - reliability reweighting of ce_score,
-      - novelty (Jaccard ≤ max_sim).
-    """
-    if not cands:
-        return []
-
-    # Compile hedge regexes once
-    hedge_patterns = [re.compile(h, flags=re.I) for h in hedge_terms or []]
-
-    # Encode question once
-    qv = _STEmbedder.encode([question])[0]
-    # Precompute sentence vectors for cosine gate
-    sv = _STEmbedder.encode([c.text for c in cands])
-
-    # Compute an adjusted relevance:
-    # rel = ce_score * w_src * max(cosine, 0)
-    adj_scores: List[Tuple[int, float]] = []
-    for i, s in enumerate(cands):
-        if _is_hedged(s.text, hedge_patterns):
-            continue  # drop hedged
-        cos = _cosine(qv, sv[i])
-        if cos < min_question_cosine:
-            continue  # too off-topic for the question
-        w_src = reliability_weights.get(_source_prefix(s.source_id), 1.0)
-        rel = (s.ce_score or 0.0) * float(w_src) * max(cos, 0.0)
-        adj_scores.append((i, rel))
-
-    if not adj_scores:
-        return []
-
-    # Sort by adjusted relevance
-    adj_scores.sort(key=lambda t: t[1], reverse=True)
-    order = [i for (i, _) in adj_scores]
-
-    # Novelty filter via Jaccard
-    chosen: List[SentenceCandidate] = []
-    chosen_toks: List[Set[str]] = []
-    for i in order:
-        tok = _tokens(cands[i].text)
-        if any(_jaccard(tok, t) > max_sim for t in chosen_toks):
+def _has_noun_like(tokens: List[str]) -> bool:
+    for t in tokens:
+        if t in _STOPWORDS:
             continue
-        chosen.append(cands[i])
-        chosen_toks.append(tok)
-        if len(chosen) >= K:
-            break
+        if len(t) >= 3 and not t.isdigit():
+            return True
+    return False
 
-    return chosen
+def _too_vague(text: str) -> bool:
+    toks = _tokens(text)
+    if len(toks) < _MIN_TOKENS:
+        return True
+    if not _has_noun_like(toks):
+        return True
+    if not _has_verb(toks):
+        return True
+    return False
 
-def draft_and_claims(
-    question: str,
-    initial_cands: List[SentenceCandidate],
-    *,
-    # New API
-    K: Optional[int] = None,
-    min_question_cosine: Optional[float] = None,
-    hedge_terms: Optional[List[str]] = None,
-    reliability_weights: Optional[Dict[str, float]] = None,
-    # Backward-compat (old API)
-    max_claims: Optional[int] = None,
-) -> Tuple[str, List[Claim]]:
+def _cap_tokens(text: str, max_tokens: int) -> str:
+    toks = _tokens(text)
+    if len(toks) <= max_tokens:
+        return text.strip()
+    return " ".join(toks[:max_tokens]).strip()
+
+def _simple_sent_split(draft: str) -> List[str]:
+    draft = (draft or "").replace(";", ". ")
+    parts = _SENT_SPLIT.split(draft.strip())
+    return [p.strip() for p in parts if p and p.strip()]
+
+def split(draft_text: str, *, max_tokens: int = _DEFAULT_MAX_TOKENS) -> List[Claim]:
     """
-    Make a short draft by concatenating top sentences (filtered), and turn each into a claim.
-
-    Backward-compat: if `max_claims` is provided and `K` is None, we use `max_claims`.
-    If the new filtering knobs are omitted, we fall back to safe defaults:
-      - min_question_cosine = 0.30
-      - hedge_terms = basic hedging patterns
-      - reliability_weights = {'news':1.0,'press':0.95,'blog':0.60,'seed':0.80,'alt':0.75}
+    Split a draft into crisp, deduped, bounded-length claims:
+      - naive sentence split
+      - dedup by normalized text
+      - drop vague sentences (no noun/verb or too short)
+      - cap tokens to <= max_tokens
     """
-    # Resolve K with backward-compat
-    if K is None:
-        K = max_claims if max_claims is not None else 3
+    if not isinstance(draft_text, str) or not draft_text.strip():
+        return []
 
-    # Defaults for new knobs if not passed (test code may omit them)
-    if min_question_cosine is None:
-        min_question_cosine = 0.30
-    if hedge_terms is None:
-        hedge_terms = [
-            r"\brumor(s|ed)?\b",
-            r"\breportedly\b",
-            r"\bmay\b",
-            r"\bmight\b",
-            r"\bpossibly\b",
-            r"\bsuggest(ed|s|ing)?\b",
-            r"\baccording to (sources|rumors)\b",
-        ]
-    if reliability_weights is None:
-        reliability_weights = {
-            "news": 1.00,
-            "press": 0.95,
-            "blog": 0.60,
-            "seed": 0.80,
-            "alt": 0.75,
-        }
+    sents = _simple_sent_split(draft_text)
+    seen_norm: Set[str] = set()
+    out: List[Claim] = []
+    k = 1
 
-    picked = pick_top_sentences(
-        question,
-        initial_cands,
-        K=K,
-        min_question_cosine=min_question_cosine,
-        hedge_terms=hedge_terms,
-        reliability_weights=reliability_weights,
-    )
-    if not picked:
-        return "", []
+    for s in sents:
+        nrm = _norm(s)
+        if not nrm:
+            continue
+        if nrm in seen_norm:
+            continue
+        if _too_vague(s):
+            continue
+        s_capped = _cap_tokens(s, max_tokens)
+        seen_norm.add(nrm)
+        out.append(Claim(claim_id=f"c{k}", text=s_capped.strip()))
+        k += 1
 
-    draft = " ".join(s.text.strip() for s in picked)
-    claims: List[Claim] = []
-    for i, s in enumerate(picked, start=1):
-        claims.append(Claim(claim_id=f"c{i}", text=s.text.strip(), is_critical=True))
-    return draft, claims
+    return out
+
+def split_into_claims(draft_text: str, *, max_tokens: int = _DEFAULT_MAX_TOKENS) -> List[Claim]:
+    return split(draft_text, max_tokens=max_tokens)
+
+
+# --- Back-compat shim for tests expecting draft_and_claims here ---
+try:
+    from sro.compose.answer import draft_and_claims as _draft_and_claims
+    def draft_and_claims(*args, **kwargs):
+        return _draft_and_claims(*args, **kwargs)
+except Exception as e:
+    # If compose.answer cannot be imported for some reason, surface a clear error
+    def draft_and_claims(*args, **kwargs):
+        raise ImportError(
+            "draft_and_claims moved to sro.compose.answer; "
+            "ensure sro/compose/answer.py is present and importable"
+        ) from e

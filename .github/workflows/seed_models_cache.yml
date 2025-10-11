@@ -1,0 +1,45 @@
+name: Seed HF models cache (one-time)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  seed:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      HF_HUB_OFFLINE: "0"
+      TRANSFORMERS_OFFLINE: "0"
+      SRO_CACHE_DIR: models_cache
+      HF_HOME: models_cache
+      SENTENCE_TRANSFORMERS_HOME: models_cache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        shell: pwsh
+        run: |
+          python -m pip install -U pip wheel setuptools
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install "transformers<5" sentence-transformers rank-bm25 numpy scikit-learn
+
+      - name: Warm models into models_cache/
+        shell: pwsh
+        run: |
+          # Your script should touch both MNLI and ST models.
+          python -m scripts.warm_models
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path models_cache)) { Write-Host "no models_cache"; exit 3 }
+          Write-Host "Cache size:"; Get-ChildItem -Recurse models_cache | Measure-Object -Property Length -Sum
+
+      - name: Save cache (models_cache)
+        uses: actions/cache/save@v4
+        with:
+          path: models_cache
+          key: models-cache-win-v1

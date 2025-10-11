@@ -144,3 +144,115 @@ def load_config(path: Optional[str] = "configs/default.yaml") -> Config:
     cfg.paths.ensure()
     return cfg
 
+# --- PR4 helpers: env overrides + profiles + validation ---
+
+def _cast_env_value(val: str, current):
+    """
+    Cast env string to the type of `current` when possible.
+    Fallback order: bool -> int -> float -> str.
+    """
+    if isinstance(current, bool):
+        return str(val).strip().lower() in ("1", "true", "yes", "y", "on")
+    # try int
+    try:
+        return int(val)
+    except Exception:
+        pass
+    # try float
+    try:
+        return float(val)
+    except Exception:
+        pass
+    # try bool as a last resort
+    s = str(val).strip().lower()
+    if s in ("1", "true", "yes", "y", "on"):
+        return True
+    if s in ("0", "false", "no", "n", "off"):
+        return False
+    return val
+
+
+def apply_env_overrides(cfg: "Config") -> None:
+    """
+    Override knobs from environment variables.
+    Supported:
+      SRO_M, SRO_L, SRO_B
+      SRO_TAU1, SRO_TAU2, SRO_DELTA, SRO_KAPPA, SRO_EPSILON
+    """
+    import os
+    mapping = {
+        "SRO_M": ("sro_prover", "M"),
+        "SRO_L": ("sro_prover", "L"),
+        "SRO_B": ("sro_prover", "B"),
+        "SRO_TAU1": ("sro_prover", "tau1"),
+        "SRO_TAU2": ("sro_prover", "tau2"),
+        "SRO_DELTA": ("sro_prover", "delta"),
+        "SRO_KAPPA": ("sro_prover", "kappa"),
+        "SRO_EPSILON": ("sro_prover", "epsilon"),
+    }
+    for env_key, (section, field) in mapping.items():
+        raw = os.getenv(env_key)
+        if raw is None:
+            continue
+        sect_obj = getattr(cfg, section, None)
+        if sect_obj is None:
+            continue
+        current = getattr(sect_obj, field, None)
+        try:
+            newv = _cast_env_value(raw, current)
+            setattr(sect_obj, field, newv)
+        except Exception:
+            # Ignore bad envs; never crash the run
+            continue
+
+
+def apply_profile(cfg: "Config", name: str) -> None:
+    """
+    --profile low|med|high -> map to (M, L, B) presets:
+      low  = (4, 12, 32)
+      med  = (8, 24, 64)
+      high = (12, 36, 96)
+    """
+    name = (name or "").strip().lower()
+    presets = {
+        "low":  (4, 12, 32),
+        "med":  (8, 24, 64),
+        "high": (12, 36, 96),
+    }
+    if name not in presets:
+        return
+    M, L, B = presets[name]
+    sp = getattr(cfg, "sro_prover", None)
+    if sp is None:
+        return
+    sp.M = int(M)
+    sp.L = int(L)
+    sp.B = int(B)
+
+
+def validate_config(cfg: "Config") -> None:
+    """
+    Sanity checks demanded by v1:
+      - tau2 >= tau1
+      - If claims.max_sentences_per_claim exists:
+          M <= max_sentences_per_claim
+          L <= max_sentences_per_claim - 1
+    Raises ValueError with a precise message if violated.
+    """
+    sp = getattr(cfg, "sro_prover", None)
+    if sp is None:
+        return
+    tau1 = float(getattr(sp, "tau1", 0.0))
+    tau2 = float(getattr(sp, "tau2", 0.0))
+    if tau2 < tau1:
+        raise ValueError(f"Config invalid: tau2({tau2}) < tau1({tau1})")
+
+    claims = getattr(cfg, "claims", None)
+    mspc = getattr(claims, "max_sentences_per_claim", None)
+    if mspc is not None:
+        M = int(getattr(sp, "M", 0))
+        L = int(getattr(sp, "L", 0))
+        if M > int(mspc):
+            raise ValueError(f"Config invalid: M({M}) > max_sentences_per_claim({mspc})")
+        if L > max(0, int(mspc) - 1):
+            raise ValueError(f"Config invalid: L({L}) > max_sentences_per_claim-1({int(mspc)-1})")

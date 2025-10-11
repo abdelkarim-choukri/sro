@@ -5,7 +5,7 @@ sro_prover:
   tau1: 0.75
   tau2: 0.80
   delta: 0.10
-  kappa: 0.05
+  kappa: 0.80   # tuned on data/processed/dev_pairs.csv, coverage ≈ 97.7%
   epsilon: 0.02
   max_sentences_per_claim: 64
 paths:

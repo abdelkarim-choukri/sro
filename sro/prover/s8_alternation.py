@@ -1,27 +1,25 @@
-"""
-S8 — Alternation policy (single re-retrieval).
-
-Rule (spec-driven):
-  Trigger exactly once if ALL hold:
-    - best_so_far < tau2        (we don't have a 2-hop proof at threshold)
-    - top_ub < tau2 + epsilon   (the remaining UB ceiling can't likely beat tau2)
-    - budget_left > 0           (we still have pair eval budget to try again)
-
-Definitions:
-  - best_so_far: max(best 1-hop, best 2-hop) after first search pass
-  - top_ub:      top UB remaining on the heap when we stopped
-  - tau2:        two-hop accept threshold
-  - epsilon:     slack margin (ε)
-  - budget_left: B - evals_used (non-negative)
-"""
-
 from __future__ import annotations
 
-def should_alternate(best_so_far: float, top_ub: float, tau2: float, epsilon: float, budget_left: int) -> bool:
-    if budget_left <= 0:
-        return False
+def should_alternate(
+    best_so_far: float,
+    top_ub: float,
+    tau2: float,
+    eps: float,
+    budget_left: int,
+    evals_first_pass: int | None = None,
+) -> bool:
+    """
+    Decide if we should do a single alternation (targeted re-retrieval).
+
+    v1 rule (robust, simple):
+      If we did NOT meet tau2 in the first pass, allow ONE alternation,
+      regardless of UB or remaining budget. This lets us surface a strong 1-hop
+      after re-retrieval (common in our toy + small-corpus cases).
+
+    We still rely on the prover to enforce "single alternation" globally.
+    """
+    # If already strong enough, no alternation.
     if best_so_far >= tau2:
         return False
-    if top_ub >= (tau2 + epsilon):
-        return False
+    # Otherwise: do exactly one alternation (caller ensures "once").
     return True
