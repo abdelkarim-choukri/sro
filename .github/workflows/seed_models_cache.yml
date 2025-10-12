@@ -33,11 +33,14 @@ jobs:
       - name: Warm models into models_cache/
         shell: pwsh
         run: |
-          # Your script should touch both MNLI and ST models.
-          python -m scripts.warm_models
+          chcp 65001 > $null
+          $env:PYTHONIOENCODING = "utf-8"
+          python -X utf8 -m scripts.warm_models
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (-not (Test-Path models_cache)) { Write-Host "no models_cache"; exit 3 }
-          Write-Host "Cache size:"; Get-ChildItem -Recurse models_cache | Measure-Object -Property Length -Sum
+          if (-not (Test-Path models_cache)) { Write-Error "models_cache not created"; exit 3 }
+          Write-Host "Cache size:"
+          Get-ChildItem -Recurse models_cache | Measure-Object -Property Length -Sum
+
 
       - name: Save cache (models_cache)
         uses: actions/cache/save@v4
