@@ -69,7 +69,7 @@ jobs:
           Write-Host "models_cache size:"
           Get-ChildItem -Recurse models_cache | Measure-Object -Property Length -Sum
 
-      - name: Sanity: check ST snapshot
+      - name: check ST snapshot
         shell: pwsh
         run: |
           $st = Get-ChildItem models_cache/hub/models--sentence-transformers--all-MiniLM-L6-v2/snapshots/*/config.json -ErrorAction SilentlyContinue
