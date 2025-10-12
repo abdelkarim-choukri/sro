@@ -1,0 +1,44 @@
+name: seed
+on:
+  workflow_dispatch:
+
+jobs:
+  seed:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install deps (minimal)
+        shell: pwsh
+        run: |
+          python -m pip install -U pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+          pip install "huggingface_hub[hf_xet]" sentence-transformers
+
+      - name: Warm models into models_cache/
+        shell: pwsh
+        env:
+          HF_HUB_OFFLINE: "0"
+          TRANSFORMERS_OFFLINE: "0"
+          SRO_CACHE_DIR: models_cache
+          HF_HOME: models_cache
+          SENTENCE_TRANSFORMERS_HOME: models_cache
+          TRANSFORMERS_CACHE: models_cache
+        run: |
+          python -m scripts.warm_models
+          if (-not (Test-Path models_cache)) { Write-Error "no models_cache"; exit 3 }
+          Write-Host "models_cache size:"
+          Get-ChildItem -Recurse models_cache | Measure-Object -Property Length -Sum
+
+      - name: Save cache (models_cache)
+        uses: actions/cache/save@v4
+        with:
+          path: models_cache
+          key: models-cache-win-v2
