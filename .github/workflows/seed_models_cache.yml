@@ -13,6 +13,7 @@ jobs:
       SRO_CACHE_DIR: models_cache
       HF_HOME: models_cache
       SENTENCE_TRANSFORMERS_HOME: models_cache
+      PYTHONIOENCODING: "utf-8"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
