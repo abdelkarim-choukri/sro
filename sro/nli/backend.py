@@ -1,23 +1,22 @@
 # sro/nli/backend.py
 """
 Does:
-    NLI backend wrapping a HF sequence classification model.
-    Offline-first with strict local loading. Supports:
-      - repo id + cache_dir (local-only)
-      - explicit local model directory (--model_dir or env SRO_NLI_MODEL_DIR)
+    Offline-first NLI backend around a HF sequence classifier with temperature scaling.
+    - Supports BOTH 3-class ({entailment, contradiction, neutral}) and binary ({entailment, not_entailment}).
+    - Reads calibration from artifacts/calib/nli_temperature.json.
+    - Accepts model by HF repo-id (cache_dir) OR explicit local dir (--model_dir / SRO_NLI_MODEL_DIR).
+    - Exposes raw logits (predict_logits) and calibrated probabilities (score_pairs).
 
-Adds:
-    * Temperature calibration loading (artifacts/calib/nli_temperature.json).
-    * Binary and 3-class NLI label handling:
-        - 3-class: 'entailment','contradiction','neutral'
-        - Binary : 'entailment','not_entailment'
-    * predict_logits() (raw).
-    * score_pairs() (applies logits / T).
-    * get_temperature().
+Inputs:
+    Text pairs (premise, hypothesis).
 
-Failure mode:
-    If files are missing locally, raises a detailed FileNotFoundError telling you exactly
-    what to do. No silent online fetch.
+Outputs:
+    score_pairs(): dict with "probs" (and optional "logits").
+    predict_logits(): raw logits (no temperature).
+
+Notes:
+    * strictly local loading (local_files_only=True). If missing locally, raises a detailed error.
+    * temperature is applied as logits / T before softmax.
 """
 from __future__ import annotations
 
@@ -34,6 +33,7 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 _LOGGER = logging.getLogger("sro.nli.backend")
 
 
+# ---------------------------- label handling ----------------------------
 def _normalize_nli_label_map(id2label: Mapping[int, str]) -> Dict[str, int]:
     """
     Build a name->index map for NLI classes from an HF id2label.
@@ -51,16 +51,14 @@ def _normalize_nli_label_map(id2label: Mapping[int, str]) -> Dict[str, int]:
             inv["entailment"] = i
         elif n in ("contradiction", "contradict", "contradictory"):
             inv["contradiction"] = i
-        elif n in ("neutral",):
+        elif n == "neutral":
             inv["neutral"] = i
         elif n in ("not_entailment", "non_entailment", "notentailment"):
             inv["not_entailment"] = i
 
-    # 3-class
     if all(k in inv for k in ("entailment", "contradiction", "neutral")):
         return {"entailment": inv["entailment"], "contradiction": inv["contradiction"], "neutral": inv["neutral"]}
 
-    # binary
     if all(k in inv for k in ("entailment", "not_entailment")):
         return {"entailment": inv["entailment"], "not_entailment": inv["not_entailment"]}
 
@@ -68,13 +66,18 @@ def _normalize_nli_label_map(id2label: Mapping[int, str]) -> Dict[str, int]:
 
 
 def _names_equivalent(a: str, b: str) -> bool:
+    """Treat repo-id and local-dir basename as equivalent for calibration matching."""
     def last(seg: str) -> str:
-        # handles both HF ids and filesystem paths
         seg = seg.strip().replace("\\", "/")
         return seg.split("/")[-1]
     return (a == b) or (last(a) == last(b))
 
+
 def _read_temperature_json(path: str, model_name: str) -> float:
+    """
+    Read calibration JSON and return T if model matches; else 1.0.
+    JSON: {"model": "<name or basename>", "T": float, "updated_at": iso8601}
+    """
     try:
         with open(path, "r", encoding="utf-8") as f:
             payload = json.load(f)
@@ -114,6 +117,7 @@ def _raise_offline_help(errs: list[str], model_name: str, model_dir: str | None,
     raise FileNotFoundError("\n".join(msg))
 
 
+# ---------------------------- batching + core ----------------------------
 @dataclass
 class _Batch:
     input_ids: torch.Tensor
@@ -124,10 +128,10 @@ class NLIBackend:
     """
     Offline-first NLI wrapper with calibrated scoring.
 
-    Key attrs:
-        model_name: str
-        model_dir: str | None
-        label_to_index: Dict[str,int]   # either tri-class or binary
+    Attrs:
+        model_name: str                         # id used for calibration matching
+        model_dir: str | None                   # explicit local dir if provided
+        label_to_index: Dict[str,int]           # tri-class or binary mapping
         index_to_label: list[str]
         is_binary: bool
         temperature: float
@@ -152,19 +156,17 @@ class NLIBackend:
         tokenizer = None
         model = None
 
-        # Try 1: explicit local directory
+        # Try 1: explicit local directory (preferred offline)
         if self.model_dir:
             try:
                 tokenizer = AutoTokenizer.from_pretrained(self.model_dir, local_files_only=True)
-                model = AutoModelForSequenceClassification.from_pretrained(
-                    self.model_dir, local_files_only=True
-                )
-                # Lock calibration artifact to directory name for stability
+                model = AutoModelForSequenceClassification.from_pretrained(self.model_dir, local_files_only=True)
+                # lock calibration identity to directory basename
                 self.model_name = os.path.basename(os.path.normpath(self.model_dir))
             except Exception as e:
                 errs.append(f"[local model_dir] {type(e).__name__}: {e}")
 
-        # Try 2: repo id + provided cache_dir (offline)
+        # Try 2: repo id via cache_dir (offline)
         if tokenizer is None or model is None:
             try:
                 tokenizer = AutoTokenizer.from_pretrained(
@@ -176,7 +178,7 @@ class NLIBackend:
             except Exception as e:
                 errs.append(f"[cache_dir] {type(e).__name__}: {e}")
 
-        # Try 3: repo id + default HF cache (offline)
+        # Try 3: repo id via default HF cache (offline)
         if tokenizer is None or model is None:
             try:
                 tokenizer = AutoTokenizer.from_pretrained(self.model_name, local_files_only=True)
@@ -204,14 +206,13 @@ class NLIBackend:
         else:
             _LOGGER.info("NLI temperature = 1.000 (uncalibrated / default)")
 
-        # Brief label scheme log
+        # Label scheme log
         if self.is_binary:
             _LOGGER.info("NLI label scheme: binary {'entailment','not_entailment'}")
         else:
             _LOGGER.info("NLI label scheme: 3-class {'entailment','contradiction','neutral'}")
 
-    # ---------- batching ----------
-    def _make_batches(self, premises: Sequence[str], hypotheses: Sequence[str], batch_size: int):
+    def _make_batches(self, premises: Sequence[str], hypotheses: Sequence[str], batch_size: int) -> Iterable[_Batch]:
         assert len(premises) == len(hypotheses), "premises and hypotheses must be same length"
         N = len(premises)
         for i in range(0, N, batch_size):
@@ -227,16 +228,19 @@ class NLIBackend:
                 attention_mask=toks["attention_mask"].to(self.device),
             )
 
-    # ---------- public ----------
+    # ---------------------------- API ----------------------------
     def predict_logits(self, premises: Sequence[str], hypotheses: Sequence[str], batch_size: int = 32) -> np.ndarray:
+        """Raw (uncalibrated) logits [N,C]."""
         outs: list[np.ndarray] = []
         with torch.no_grad():
             for batch in self._make_batches(premises, hypotheses, batch_size):
                 logits = self.model(
                     input_ids=batch.input_ids, attention_mask=batch.attention_mask
-                ).logits  # [B, C]
+                ).logits  # [B,C]
                 outs.append(logits.detach().cpu().numpy())
-        return np.concatenate(outs, axis=0) if outs else np.zeros((0, self.model.config.num_labels), dtype=np.float32)
+        if not outs:
+            return np.zeros((0, self.model.config.num_labels), dtype=np.float32)
+        return np.concatenate(outs, axis=0)
 
     def score_pairs(
         self,
@@ -245,6 +249,7 @@ class NLIBackend:
         batch_size: int = 32,
         return_logits: bool = False,
     ) -> Dict[str, np.ndarray]:
+        """Calibrated probabilities; applies logits / T then softmax."""
         raw = self.predict_logits(premises, hypotheses, batch_size)
         logits = raw / float(self.temperature)
         z = logits - np.max(logits, axis=1, keepdims=True)
@@ -256,4 +261,5 @@ class NLIBackend:
         return out
 
     def get_temperature(self) -> float:
+        """Return current temperature (1.0 if uncalibrated/missing)."""
         return float(self.temperature)
