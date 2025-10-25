@@ -230,6 +230,7 @@ def make_fetch_more(corpus_jsonl: str,
     """
     Return a fetch_more(claim=..., **kwargs) callback that returns
     up to k_fused SentenceCandidate from the corpus for the given claim string.
+    only if S8 (alternation) triggers it.
     """
     index = CorpusIndex(corpus_jsonl)
     def _fetch_more(**kwargs):

@@ -1,6 +1,7 @@
 # scripts/run_question.py
 from __future__ import annotations
 # === BOOTSTRAP: env + console + warning filters (must be before any HF/ST imports) ===
+import json
 import os, sys, warnings
 from pathlib import Path
 
@@ -24,6 +25,9 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 os.environ.setdefault("TQDM_DISABLE", "1")  # belt-and-suspenders for progress bars
 
 # UTF-8-safe console on Windows (avoid UnicodeEncodeError: 'gbk')
+# On Windows, printing e.g. “Résumé ✨” 
+# can raise UnicodeEncodeError: 'gbk' codec can't encode character .... 
+# Forcing UTF-8 prevents that.
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -48,21 +52,6 @@ from sro.rerank.cross_encoder import CrossEncoderReranker
 from sro.compose.answer import compose_answer_with_citations
 from sro.utils.random import set_all_seeds
 
-# UTF-8-safe console
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
-
-# Force offline/cache on every process
-HF_CACHE = str(Path("models_cache"))
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
-os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-os.environ.setdefault("HUGGINGFACE_HUB_CACHE", HF_CACHE)
-os.environ.setdefault("HF_HOME", HF_CACHE)
-os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
-os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 def _norm_cite(s) -> dict:
     if isinstance(s, dict):
@@ -87,13 +76,20 @@ def ensure_demo_corpus(corpus_path: Path) -> None:
             f.write(json.dumps(d, ensure_ascii=False) + "\n")
 
 def main():
+
+    import logging, os
+    logging.basicConfig(
+        level=os.environ.get("SRO_LOGLEVEL", "INFO"),
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    )
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--question", type=str, default="Does the iPhone 15 Pro have a titanium frame?")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--bs_nli1", type=int, default=32, help="Batch size for 1-hop NLI (S1).")
     ap.add_argument("--bs_nli2", type=int, default=32, help="Batch size for 2-hop NLI (pair scoring).")
     ap.add_argument("--profile", type=str, choices=["low", "med", "high"], default=None,
-                    help="Preset for (M,L,B).")
+                    help="Preset for (M,L,B)")
     args = ap.parse_args()
 
     # determinism
@@ -101,11 +97,11 @@ def main():
 
     # config
     cfg = load_config()
-    if args.profile:
+    if args.profile: 
         apply_profile(cfg, args.profile)
-    apply_env_overrides(cfg)
+    apply_env_overrides(cfg) 
     validate_config(cfg)
-
+    
     # show effective knobs
     sp = cfg.sro_prover
     print(
@@ -148,9 +144,13 @@ def main():
     draft, claims = draft_and_claims(
         args.question, init,
         K=cfg.claims.K,
-        min_question_cosine=cfg.claims.min_question_cosine,
-        hedge_terms=cfg.claims.hedge_terms,
-        reliability_weights=cfg.claims.reliability_weights,
+        min_question_cosine=cfg.claims.min_question_cosine,#A minimum cosine similarity (using sentence embeddings) between claim and question. 
+                                                             # If a generated claim is too far from the question, it’s dropped.
+
+        hedge_terms=cfg.claims.hedge_terms,#Words like "might", "reportedly", "could". If a sentence contains these hedging terms, 
+                                            #we tone it down (or drop it), so claims are crisp.
+        reliability_weights=cfg.claims.reliability_weights,#Source trust weights. Example: { "press": 1.0, "news": 0.9, "blog": 0.3 }. 
+                                                            #This boosts/penalizes claims depending on where the sentence came from.
     )
 
     # alternation fetcher + prover
@@ -161,7 +161,7 @@ def main():
         k_fused=cfg.retrieval.k_fused,
     )
     prover = SROProver(cfg, use_real_nli=True, bs_nli1=args.bs_nli1, bs_nli2=args.bs_nli2)
-
+ 
     accepted = []
     accepted_proofs = []
     for cl in claims:

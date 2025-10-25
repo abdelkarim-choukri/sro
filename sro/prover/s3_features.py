@@ -270,7 +270,17 @@ def build_pair_features(
       pairs: List[(i,j)]
       feats: per-pair dict with keys:
         max_p1, entity_overlap, time_agreement, distance, novelty, ce_max,
-        negation_conflict, source_diversity
+        negation_conflict, source_diversity example:
+        {
+        "max_p1": 0.93,
+        "sum_p1": 1.00,
+        "ce_max": 0.90,
+        "entity_overlap": 0.00,
+        "time_agreement": 0.50,
+        "distance": 0.889,
+        "section_novelty": 1.00,
+        "similarity_penalty": 0.00,
+        } 
     """
     cset = set(claim_tokens or [])
     pairs: List[Tuple[int, int]] = []

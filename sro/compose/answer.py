@@ -167,7 +167,7 @@ def compose_answer_with_citations(
     return final_answer, refs
 
 
-
+ 
 
 from typing import List, Dict, Tuple, Set, Optional
 import re
@@ -185,6 +185,8 @@ def _jaccard(a: Set[str], b: Set[str]) -> float:
     return (inter / union) if union else 0.0
 
 def _source_prefix(source_id: str) -> str:
+    """Extracts the prefix from a source_id string, which is the part before the first colon.
+     For example, given 'news:12345', it returns 'news'."""
     return (source_id or "").split(":", 1)[0] if source_id else ""
 
 class _ST:
@@ -196,9 +198,12 @@ class _ST:
         return cls._m.encode(texts, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False, batch_size=64)
 
 def _cos(a: np.ndarray, b: np.ndarray) -> float:
+    """takes two vectors (NumPy arrays a and b) and computes their similarity score"""
     return float(np.clip((a*b).sum(), -1.0, 1.0))
 
 def _is_hedged(text: str, pats: List[re.Pattern]) -> bool:
+    """Checks if the given text contains any hedging terms based on provided regex patterns.
+     for example, if the text contains words like "might" or "reportedly", it returns True."""
     low = (text or "").lower()
     return any(p.search(low) for p in pats)
 
@@ -212,9 +217,12 @@ def pick_top_sentences(
     reliability_weights: Dict[str, float],
     max_sim: float = 0.85,
 ) -> List[SentenceCandidate]:
+    """Pick top-K sentences from cands relevant to question,
+    filtering out hedged sentences and near-duplicates."""
     if not cands:
         return []
     pats = [re.compile(h, re.I) for h in hedge_terms or []]
+    # _ST.enc:converts question into a numerical representation called an embedding using a sentence-transformer model
     qv = _ST.enc([question])[0]
     sv = _ST.enc([c.text for c in cands])
 

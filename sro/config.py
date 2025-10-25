@@ -176,8 +176,16 @@ def apply_env_overrides(cfg: "Config") -> None:
     """
     Override knobs from environment variables.
     Supported:
-      SRO_M, SRO_L, SRO_B
-      SRO_TAU1, SRO_TAU2, SRO_DELTA, SRO_KAPPA, SRO_EPSILON
+      SRO_M, SRO_L, SRO_B SRO_TAU1, SRO_TAU2, SRO_DELTA, SRO_KAPPA, SRO_EPSILON
+        M (frontier size): how many top one-hop sentences we keep for pairing.
+        L (second-pool size): how many additional sentences we consider to pair with the frontier.
+        B (pair budget): maximum number of sentence pairs we actually score in bounded search.
+        τ₁ / tau1 (one-hop threshold in [0,1]): a single sentence must score ≥ τ₁ to accept as 1-hop proof.
+        τ₂ / tau2 (two-hop threshold in [0,1]): a pair must score ≥ τ₂ to accept as 2-hop proof.
+        δ / delta (safety margin in [0,1]): we only ship if (proof_score − strongest_contradiction) ≥ δ.
+        κ / kappa (UB cushion in [0,1]): optimism added to the upper bound so UB rarely underestimates the true two-hop score.
+        ε / epsilon (alternation slack in [0,1]): how far below τ₂ we allow before we try one single re-retrieve (alternation).
+
     """
     import os
     mapping = {

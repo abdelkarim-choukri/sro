@@ -81,11 +81,11 @@ def bounded_search(
                 ub = 0.0
             heapq.heappush(heap, (-ub, k))
 
-        best_so_far = max(p1) if p1 else 0.0
-        best_pair = None
-        best_p2 = 0.0
-        evals = 0
-        stop_reason = "UB_BEATEN"
+        best_so_far = max(p1) if p1 else 0.0 #starts as max(p1) (best single-sentence score so far), or 0.0 if no p1.
+        best_pair = None #index of best pair found later in S5 (starts None).
+        best_p2 = 0.0 #best true 2-hop score found so far (starts 0.0).
+        evals = 0 # how many real pair evaluations you’ve done (starts 0).
+        stop_reason = "UB_BEATEN" # default reason to report if pruning stops the search (starts "UB_BEATEN").
 
 
     # ---------------- S5: bounded search ----------------

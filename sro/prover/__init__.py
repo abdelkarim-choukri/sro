@@ -174,6 +174,7 @@ class SROProver:
 
         # Optional legacy attr for any stray uses
         self.batch_size = self.bs_nli1
+        
     def prove(
         self,
         claim: Claim,
@@ -183,7 +184,7 @@ class SROProver:
         if not isinstance(claim.text, str) or not claim.text.strip():
             return ProverResult(status="REJECT", reason="NO_PROOF")
         if not candidates:
-            return ProverResult(status="REJECT", reason="NO_PROOF")
+            return ProverResult(status="REJECT", reason="NO_PROOF") 
 
         t = StageTimer()
         knobs = self.cfg.sro_prover
@@ -268,6 +269,7 @@ class SROProver:
             return ProverResult(status="ACCEPT", proof=proof)
 
         # ---------- S8: Alternation gate ----------
+        # Sets the bar we need to beat (best_so_far) and how much budget remains for the second pass.
         best_so_far = max(best1_score, best_p2)
         remaining_budget = max(0, B - evals)
         if fetch_more is None:

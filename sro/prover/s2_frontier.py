@@ -63,15 +63,16 @@ def select_frontier_and_pool(
     if L < 0:
         L = 0
 
-    # Clean p1 (NaN/inf → 0, clamp to [0,1])
+    # Clean p1 (NaN/inf → 0, clamp to [0,1](for exmple 1.2 → 1.0))
     p1c = [_clean01(v) for v in p1]
 
     # Precompute tokens once
     token_cache: Dict[str, Set[str]] = {c.sent_id: _tokens(c.text) for c in candidates}
 
-    # ----- Stable base order by relevance (p1), then ce_score, then sent_id
+    # ----- sorted order by relevance (p1), then ce_score, then sent_id
     # This ensures deterministic tie-breaking.
     def _base_key(i: int):
+        """sorted order by relevance (p1), then ce_score, then sent_id (tie-break). Used for MMR tie-breaking. """
         # Sort descending by p1, ce_score; ascending by sent_id for tie
         return (-p1c[i], -(candidates[i].ce_score or 0.0), str(candidates[i].sent_id))
 
@@ -98,6 +99,9 @@ def select_frontier_and_pool(
     # Iteratively add items that maximize λ·p1 − (1−λ)·max_sim
     # Each iteration only updates max_sim against the newly selected item → O(M·N).
     lam = float(lambda_diversity)
+    #lam=1: only care about strength (p1c).
+    #lam=0: only care about diversity (penalize overlap).
+    
     one_minus_lam = 1.0 - lam
     while len(frontier) < min(M, n):
         j_new = frontier[-1]

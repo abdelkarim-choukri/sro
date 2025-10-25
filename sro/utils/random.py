@@ -6,7 +6,9 @@ try:
     import torch
 except Exception:
     torch = None
-
+# this chunk is about making  runs reproducible (same results every time) 
+# by seeding all RNGs (random number generators) and 
+# forcing PyTorch/cuDNN (NVIDIA’s deep-learning kernels) into deterministic behavior
 def set_all_seeds(seed: int) -> None:
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
