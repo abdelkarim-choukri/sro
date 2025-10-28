@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Dict, List, Set, Tuple
 
 from sro.types import SentenceCandidate
 

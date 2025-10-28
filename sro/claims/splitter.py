@@ -1,10 +1,9 @@
 # sro/claims/splitter.py
 from __future__ import annotations
 
-from math import e
 import os
 import re
-from typing import List, Set
+from math import e
 
 from sro.types import Claim
 

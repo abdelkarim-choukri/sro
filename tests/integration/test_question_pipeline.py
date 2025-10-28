@@ -6,9 +6,7 @@ from pathlib import Path
 from sro.claims.splitter import draft_and_claims
 from sro.config import load_config
 from sro.prover import SROProver
-from sro.rerank.cross_encoder import CrossEncoderReranker
 from sro.retrieval.hybrid import get_initial_candidates, make_fetch_more
-from sro.types import Claim
 
 CORPUS = Path("data/corpus/corpus.jsonl")
 
@@ -28,7 +26,7 @@ def test_question_end_to_end():
     _ensure_demo()
     cfg = load_config()
     # keep test light: no CE
-    reranker = None
+    _reranker = None
 
     q = "Does the iPhone 15 Pro have a titanium frame?"
     init = get_initial_candidates(

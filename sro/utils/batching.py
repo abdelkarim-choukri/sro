@@ -1,6 +1,6 @@
 # sro/utils/batching.py
 from collections.abc import Iterable, Iterator
-from typing import List, TypeVar
+from typing import TypeVar
 
 T = TypeVar("T")
 

@@ -7,7 +7,6 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
 
 # bootstrap: offline + utf-8
 try:

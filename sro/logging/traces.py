@@ -4,7 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
-from typing import Any, Dict
+from typing import Any
 
 _REQUIRED_KEYS = {
     "qid",

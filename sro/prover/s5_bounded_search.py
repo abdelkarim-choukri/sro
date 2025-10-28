@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import heapq
 from contextlib import nullcontext
-from typing import Dict, List, Optional, Tuple
 
 from sro.prover.s4_ub import UBWeights, clamp01, upper_bound
 from sro.types import SentenceCandidate

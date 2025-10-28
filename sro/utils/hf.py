@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Iterable
-from typing import Optional
 
 from huggingface_hub import snapshot_download
 

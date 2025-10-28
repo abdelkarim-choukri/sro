@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import os
 from pathlib import Path
 
 from sro.config import apply_env_overrides, load_config

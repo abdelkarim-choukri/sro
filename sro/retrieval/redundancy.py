@@ -24,8 +24,6 @@ Notes:
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional
-
 import numpy as np
 
 from sro.embeddings.backend import EmbeddingBackend
@@ -35,7 +33,6 @@ def _ensure_unit_norm(mat: np.ndarray) -> np.ndarray:
     norms = np.linalg.norm(mat, axis=1, keepdims=True)
     norms = np.where(norms == 0.0, 1.0, norms)
     return mat / norms
-
 
 def mmr_select_cosine(
     texts: list[str],
@@ -55,19 +52,23 @@ def mmr_select_cosine(
     assert len(ids) == N, "ids length mismatch"
 
     if N == 0:
-        z = np.zeros((0,), dtype=np.float32)
+        z: np.ndarray = np.zeros((0,), dtype=np.float32)
         return {"selected_idx": [], "max_sim": z, "novelty": z}
 
     M = int(max(0, min(M, N)))
     if M == 0:
-        return {"selected_idx": [], "max_sim": np.zeros((N,), dtype=np.float32), "novelty": np.ones((N,), dtype=np.float32)}
+        return {
+            "selected_idx": [],
+            "max_sim": np.zeros((N,), dtype=np.float32),
+            "novelty": np.ones((N,), dtype=np.float32),
+        }
 
     vecs = np.vstack([embed_backend.encode(texts[i], ids[i]) for i in range(N)]).astype(np.float32)
     vecs = _ensure_unit_norm(vecs)
 
-    max_sim = np.zeros((N,), dtype=np.float32)
+    max_sim: np.ndarray = np.zeros((N,), dtype=np.float32)
     selected: list[int] = []
-    in_selected = np.zeros((N,), dtype=bool)
+    in_selected: np.ndarray = np.zeros((N,), dtype=bool)
 
     # order: higher p1, then lower index
     order = np.lexsort((np.arange(N), -p1_scores))
@@ -90,7 +91,7 @@ def mmr_select_cosine(
 
         vj = vecs[best_i]
         sims = np.clip(vecs @ vj, -1.0, 1.0)  # cosine = dot for unit vectors
-        sims = np.where(sims >= sim_threshold, 1.0, sims)  # near-duplicates treated as full dup
+        sims = np.where(sims >= sim_threshold, 1.0, sims)  # near-duplicates→full dup
         max_sim = np.maximum(max_sim, sims.astype(np.float32))
 
     novelty = 1.0 - max_sim

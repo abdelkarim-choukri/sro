@@ -321,16 +321,12 @@ import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
 from typing import Any
-from collections.abc import Sequence
 
 import numpy as np
 
 from sro.embeddings.backend import EmbeddingBackend
 from sro.retrieval.redundancy import mmr_select_cosine
-
-from .faiss_index import search_faiss
 
 # ---------- Public candidate type ----------
 
@@ -860,7 +856,7 @@ def get_initial_candidates(
     # --- Optional FAISS path BEFORE fusion ---
     if use_faiss and faiss_dir:
         try:
-            from sro.retrieval.faiss_index import search_faiss, EmbeddingBackend  # type: ignore
+            from sro.retrieval.faiss_index import EmbeddingBackend, search_faiss  # type: ignore
 
             embed_backend: Any = None
             get_backend = globals().get("_get_embedding_backend")

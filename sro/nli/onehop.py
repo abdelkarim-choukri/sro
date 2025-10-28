@@ -1,5 +1,4 @@
 # sro/nli/onehop.py
-from typing import List, Tuple
 
 import torch
 

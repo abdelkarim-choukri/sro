@@ -2,21 +2,20 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
-import sys
+from pathlib import Path
+from typing import Sequence
 
-from sro.retrieval.faiss_index import build_faiss_index
+import numpy as np
 
 
-# We try a few likely import locations for your embedding backend.
-# Adjust if your repo uses a different path/name.
-# The backend must expose: encode(texts: list[str], batch_size: int) -> np.ndarray
 def _load_embedding_backend():
     """
     Try project backends; if none, return a deterministic offline-safe embed.
     """
-    tried = []
+    tried: list[str] = []
     for modpath, factory in [
         ("sro.retrieval.hybrid", "_get_embedding_backend"),
         ("sro.retrieval.embedding_backend", "EmbeddingBackend"),
@@ -32,22 +31,20 @@ def _load_embedding_backend():
                 if be is not None:
                     return be
             # class with default ctor
-            return obj()  
+            return obj()
         except Exception as e:
             tried.append(f"{modpath}.{factory}: {e!r}")
             continue
 
     # Fallback: deterministic tiny hash embed (must match hybrid's fallback algo)
-    import numpy as np
-
     class _TinyHashEmbed:
         def __init__(self, dim: int = 64) -> None:
             self.dim = int(dim)
 
-        def encode(self, texts, batch_size: int = 32):
-            out = []
+        def encode(self, texts: Sequence[str], batch_size: int = 32) -> np.ndarray:
+            out: list[np.ndarray] = []
             for t in texts:
-                v = np.zeros(self.dim, dtype=np.float32)
+                v: np.ndarray = np.zeros(self.dim, dtype=np.float32)
                 b = t.encode("utf-8")
                 for i, ch in enumerate(b):
                     v[(i + ch) % self.dim] += float((ch % 13) - 6)
@@ -58,35 +55,45 @@ def _load_embedding_backend():
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser("Build embeddings + optional FAISS index (offline-safe).")
-    ap.add_argument("--corpus", required=True, help="Path to JSONL with {sent_id, text}.")
-    ap.add_argument("--out", required=True, help="Output directory for FAISS artifacts.")
-    ap.add_argument("--bs", type=int, default=256, help="Batch size for embedding.")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--corpus", type=str, required=True)
+    ap.add_argument("--out", type=str, required=True)
+    ap.add_argument("--bs", type=int, default=256)
     args = ap.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    os.makedirs(args.out, exist_ok=True)
+    from sro.retrieval.faiss_index import build_faiss_index  # local import keeps startup light
 
     backend = _load_embedding_backend()
-    build_faiss_index(args.corpus, backend, args.out, bs=args.bs)
+    Path(args.out).mkdir(parents=True, exist_ok=True)
 
-    from sro.retrieval.faiss_index import _paths  
-    P = _paths(args.out)
-    import json, numpy as np  # noqa
+    build_faiss_index(args.corpus, backend, args.out, bs=int(args.bs))
 
-    meta = {}
-    if os.path.exists(P.meta):
-        with open(P.meta, encoding="utf-8") as f:
+    # Log summary from meta.json
+    meta_path = os.path.join(args.out, "meta.json")
+    embeddings_path = os.path.join(args.out, "embeddings.npy")
+    ids_path = os.path.join(args.out, "ids.npy")
+    index_path = os.path.join(args.out, "index.faiss")
+
+    size = dim = 0
+    have_faiss = False
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
+        size = int(meta.get("size", 0))
+        dim = int(meta.get("dim", 0))
+        have_faiss = bool(meta.get("have_faiss", False))
+    except Exception:
+        pass
 
-    dim = meta.get("dim", "?")
-    size = meta.get("size", "?")
-    have_faiss = meta.get("have_faiss", False)
-
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     logging.info(
-        f"FAISS build done: size={size} dim={dim} have_faiss={have_faiss} "
-        f"embeddings={os.path.exists(P.embeddings)} ids={os.path.exists(P.ids)} "
-        f"index={os.path.exists(P.faiss_index)}"
+        "FAISS build done: size=%d dim=%d have_faiss=%s embeddings=%s ids=%s index=%s",
+        size,
+        dim,
+        have_faiss,
+        os.path.exists(embeddings_path),
+        os.path.exists(ids_path),
+        os.path.exists(index_path),
     )
 
 

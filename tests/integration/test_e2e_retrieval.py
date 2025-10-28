@@ -6,7 +6,6 @@ from pathlib import Path
 
 from sro.config import load_config
 from sro.prover import SROProver
-from sro.rerank.cross_encoder import CrossEncoderReranker
 from sro.retrieval.hybrid import get_initial_candidates, make_fetch_more
 from sro.types import Claim
 

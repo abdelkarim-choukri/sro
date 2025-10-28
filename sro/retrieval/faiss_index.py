@@ -1,22 +1,26 @@
-# sro/retrieval/faiss_index.py
 from __future__ import annotations
 
 import json
 import logging
 import os
 import pathlib
-from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Iterable, Protocol, Sequence
 
 import numpy as np
 
+# Bind a single name `faiss` with a stable type for mypy.
+faiss: Any  # declaration only (no assignment)
+
 try:
-    import faiss
+    import faiss as _faiss  # runtime import
+    faiss = _faiss          # assign without re-annotating
     _HAVE_FAISS = True
 except Exception:
-    faiss = None  # type: ignore[assignment]
+    faiss = None
     _HAVE_FAISS = False
+
+
 
 
 

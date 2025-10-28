@@ -20,7 +20,7 @@ import os
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any
 
 ISO = "%Y-%m-%dT%H:%M:%S.%fZ"
 

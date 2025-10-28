@@ -35,7 +35,6 @@ import logging
 import os
 import random
 import re
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -110,12 +109,12 @@ def _entail_idx_from_backend(backend) -> int:
     """
     # Preferred: explicit mapping
     if hasattr(backend, "label_to_index"):
-        m = getattr(backend, "label_to_index")
+        m = backend.label_to_index
         if isinstance(m, dict) and "entailment" in m:
             return int(m["entailment"])
     # Common HF-style attributes
     if hasattr(backend, "index_to_label"):
-        seq = getattr(backend, "index_to_label")
+        seq = backend.index_to_label
         try:
             for i, name in enumerate(seq):
                 if str(name).lower() == "entailment":
@@ -123,7 +122,7 @@ def _entail_idx_from_backend(backend) -> int:
         except Exception:
             pass
     if hasattr(backend, "id2label"):
-        d = getattr(backend, "id2label")
+        d = backend.id2label
         if isinstance(d, dict):
             for k, v in d.items():
                 if str(v).lower() == "entailment":

@@ -196,10 +196,8 @@
 # sro/prover/s3_features.py
 from __future__ import annotations
 
-import math
 import re
 from collections.abc import Iterable
-from typing import Dict, List, Set, Tuple
 
 from sro.types import SentenceCandidate
 

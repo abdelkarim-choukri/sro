@@ -1,20 +1,18 @@
 # scripts/run_e2e_retrieval.py
-
-
 from __future__ import annotations
 
+import argparse
 import json
 import logging
-
-# === BOOTSTRAP: env + console + warning filters (must be before any HF/ST imports) ===
 import os
 import sys
 import warnings
 from pathlib import Path
+from typing import Any, cast
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-# Silence HF hub's deprecated message about local_dir_use_symlinks (it’s harmless noise)
+# Silence HF hub's deprecated message about local_dir_use_symlinks (harmless noise)
 warnings.filterwarnings(
     "ignore",
     message="`local_dir_use_symlinks` parameter is deprecated",
@@ -31,14 +29,16 @@ os.environ.setdefault("HF_HOME", HF_CACHE)
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-os.environ.setdefault("TQDM_DISABLE", "1")  # belt-and-suspenders for progress bars
+os.environ.setdefault("TQDM_DISABLE", "1")
 
-# UTF-8-safe console on Windows (avoid UnicodeEncodeError: 'gbk')
+# UTF-8-safe console on Windows; keep mypy happy by casting to Any
 try:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    if hasattr(sys.stderr, "reconfigure"):
-        sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    _stdout = cast(Any, sys.stdout)
+    _stderr = cast(Any, sys.stderr)
+    if hasattr(_stdout, "reconfigure"):
+        _stdout.reconfigure(encoding="utf-8")
+    if hasattr(_stderr, "reconfigure"):
+        _stderr.reconfigure(encoding="utf-8")
 except Exception:
     pass
 
@@ -48,31 +48,11 @@ try:
     tflog.set_verbosity_error()
 except Exception:
     pass
-# === END BOOTSTRAP ===
-
-
-import argparse
 
 from sro.config import apply_env_overrides, apply_profile, load_config, validate_config
 from sro.rerank.cross_encoder import CrossEncoderReranker
 from sro.retrieval.hybrid import get_initial_candidates
 from sro.utils.random import set_all_seeds
-
-# UTF-8-safe console
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
-
-# Force offline/cache on every process
-HF_CACHE = str(Path("models_cache"))
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
-os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-os.environ.setdefault("HUGGINGFACE_HUB_CACHE", HF_CACHE)
-os.environ.setdefault("HF_HOME", HF_CACHE)
-os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
-os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 
 def ensure_demo_corpus(corpus_path: Path) -> None:
@@ -80,13 +60,21 @@ def ensure_demo_corpus(corpus_path: Path) -> None:
     if corpus_path.exists():
         return
     docs = [
-        {"source_id": "news:1",
-         "text": "Apple announced the iPhone 15 lineup in 2023. The iPhone 15 Pro features a titanium frame. "
-                 "Preorders began in September, with shipments later that month."},
-        {"source_id": "press:1",
-         "text": "In September 2023, Apple released the iPhone 15 series. The Pro models introduced a titanium frame for durability."},
-        {"source_id": "blog:1",
-         "text": "Rumors suggested the Pro might include titanium. However, confirmation came at the September event."}
+        {
+            "source_id": "news:1",
+            "text": (
+                "Apple announced the iPhone 15 lineup in 2023. The iPhone 15 Pro features a titanium frame. "
+                "Preorders began in September, with shipments later that month."
+            ),
+        },
+        {
+            "source_id": "press:1",
+            "text": "In September 2023, Apple released the iPhone 15 series. The Pro models introduced a titanium frame for durability.",
+        },
+        {
+            "source_id": "blog:1",
+            "text": "Rumors suggested the Pro might include titanium. However, confirmation came at the September event.",
+        },
     ]
     with corpus_path.open("w", encoding="utf-8") as f:
         for d in docs:
@@ -98,7 +86,7 @@ def _brief_text(s: str, n: int = 140) -> str:
     return s if len(s) <= n else (s[: n - 1] + "…")
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser("E2E retrieval demo")
     ap.add_argument("--query", type=str, default="Does the iPhone 15 Pro have a titanium frame?")
     ap.add_argument("--seed", type=int, default=42)

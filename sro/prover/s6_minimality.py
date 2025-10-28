@@ -1,5 +1,4 @@
 # sro/prover/s6_minimality.py
-from typing import Optional, Tuple
 
 
 def is_minimal(

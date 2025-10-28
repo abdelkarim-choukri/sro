@@ -23,7 +23,6 @@ Notes:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Set
 
 from sro.types import Claim, ProofObject, SentenceCandidate
 

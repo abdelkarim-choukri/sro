@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict
 
 # Pin cache + offline; we set these again here in case someone imports this module directly
 _HF_CACHE = str(Path("models_cache"))

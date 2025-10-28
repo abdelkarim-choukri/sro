@@ -25,7 +25,6 @@ from __future__ import annotations
 import os
 from collections.abc import Sequence
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer

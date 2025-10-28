@@ -124,9 +124,12 @@ jobs:
           mypy sro/retrieval sro/logging scripts/build_faiss.py scripts/run_e2e_retrieval.py
 
 
-      - name: Unit subset (offline-safe)
+      - name: Tests (unit subset + coverage)
         run: |
-          pytest -q tests/test_traces_shape.py
-          pytest -q tests/ci/test_cpu_path.py
           pytest -q tests/test_faiss_build_and_search.py
           pytest -q tests/test_hybrid_faiss_flag.py
+          pytest -q tests/test_traces_shape.py
+          pytest -q tests/test_frontier_cosine.py
+          pytest -q tests/test_mmr_edges.py
+          pytest -q tests/test_traces_more.py
+          pytest -q --cov=sro.retrieval.redundancy --cov=sro.logging.traces --cov-report=term-missing --cov-fail-under=85

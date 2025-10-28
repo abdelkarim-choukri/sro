@@ -2,14 +2,11 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Set, Tuple
 
 import numpy as np
 
-from sro.utils.st import get_st
-import re
-from typing import Optional
 from sro.types import Claim, SentenceCandidate
+from sro.utils.st import get_st
 
 # ----------------------------
 # Lightweight token helpers
@@ -176,9 +173,6 @@ def compose_answer_with_citations(
  
 
 import re
-from typing import Optional
-
-from sro.types import Claim, SentenceCandidate
 
 _WORD_RE = re.compile(r"[A-Za-z0-9]+")
 def _tokens(s: str) -> set[str]:

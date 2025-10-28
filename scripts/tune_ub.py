@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-from typing import Tuple
 
 import numpy as np
 import pandas as pd

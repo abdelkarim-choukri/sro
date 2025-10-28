@@ -18,7 +18,7 @@ import logging
 import os
 import random
 import traceback
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -86,12 +86,12 @@ def _extract_conflict_probs(out: dict, backend) -> np.ndarray:
 
     # Fall back to backend mappings
     if hasattr(backend, "label_to_index"):
-        m = getattr(backend, "label_to_index")
+        m = backend.label_to_index
         for name in ("contradiction", "not_entailment"):
             if isinstance(m, dict) and name in m:
                 return probs[:, int(m[name])].astype("float32")
     if hasattr(backend, "id2label"):
-        d = getattr(backend, "id2label")
+        d = backend.id2label
         if isinstance(d, dict):
             inv = {str(v).lower(): int(k) for k, v in d.items()}
             for name in ("contradiction", "not_entailment"):
@@ -215,15 +215,15 @@ def _pretty_print_result(out: dict[str, Any] | None) -> None:
 # ---------------- helpers: entailment probs & inputs ----------------
 def _entail_idx_from_backend(backend) -> int:
     if hasattr(backend, "label_to_index"):
-        m = getattr(backend, "label_to_index")
+        m = backend.label_to_index
         if isinstance(m, dict) and "entailment" in m:
             return int(m["entailment"])
     if hasattr(backend, "index_to_label"):
-        for i, name in enumerate(getattr(backend, "index_to_label")):
+        for i, name in enumerate(backend.index_to_label):
             if str(name).lower() == "entailment":
                 return int(i)
     if hasattr(backend, "id2label"):
-        d = getattr(backend, "id2label")
+        d = backend.id2label
         if isinstance(d, dict):
             for k, v in d.items():
                 if str(v).lower() == "entailment":

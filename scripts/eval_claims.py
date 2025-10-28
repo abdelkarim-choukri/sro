@@ -5,7 +5,7 @@ import argparse
 import csv
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from sro.config import load_config
 from sro.prover import SROProver
@@ -144,9 +144,11 @@ def main():
                 hop2 += 1
 
             if label == "true":
-                accept_T += 1; TP += 1
+                accept_T += 1
+                TP += 1
             else:
-                accept_F += 1; FP += 1
+                accept_F += 1
+                FP += 1
         elif status == "REJECT":
             reject += 1
             if label == "false":

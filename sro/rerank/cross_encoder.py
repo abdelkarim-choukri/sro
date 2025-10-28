@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import List, Optional
 
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer

@@ -1,5 +1,4 @@
 # sro/prover/s7_safety.py
-from typing import Tuple
 
 
 def safe_to_ship(score_star: float, cmax: float, delta: float) -> tuple[bool, str]:

@@ -1,5 +1,4 @@
 # sro/nli/pairs.py
-from typing import List, Tuple
 
 import torch
 

@@ -23,13 +23,11 @@ from __future__ import annotations
 import json
 import logging
 import os
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 _ALLOW_DUMMY_NLI = os.getenv("SRO_ALLOW_DUMMY_NLI", "") == "1"
 
@@ -148,9 +146,13 @@ class NLIBackend:
         device: str | None = None,
         temperature: float | None = None,
     ) -> None:
+        import os
+
         self._dummy: bool = False
         self.model_name: str = model_name or os.getenv("SRO_NLI_MODEL_NAME", "facebook/bart-large-mnli")
-        self.temperature: float = float(temperature if temperature is not None else os.getenv("SRO_NLI_TEMPERATURE", "1.0"))
+        self.temperature: float = float(
+            temperature if temperature is not None else os.getenv("SRO_NLI_TEMPERATURE", "1.0")
+        )
 
         # Common attrs some code relies on
         self.label_to_index: dict[str, int] = {"entailment": 0, "neutral": 1, "contradiction": 2}
@@ -176,6 +178,9 @@ class NLIBackend:
                 self._device_str = "cuda" if torch.cuda.is_available() else "cpu"
             else:
                 self._device_str = "cpu"
+
+        # Runtime flag (read AFTER test sets env)
+        allow_dummy = (os.getenv("SRO_ALLOW_DUMMY_NLI") or "") == "1"
 
         # Try to load a real model from local cache; else dummy if allowed; else error.
         try:
@@ -207,12 +212,11 @@ class NLIBackend:
             if id2label:
                 # Normalize to lowercase for robustness
                 rev = {str(v).lower(): int(k) for k, v in id2label.items()}
-                # Update our mapping if present
                 for lbl in ("entailment", "neutral", "contradiction"):
                     if lbl in rev:
                         self.label_to_index[lbl] = rev[lbl]
         except Exception as e:
-            if _ALLOW_DUMMY_NLI:
+            if allow_dummy:
                 # Minimal, deterministic, CPU-only dummy backend
                 self._dummy = True
                 self.model_name = "dummy-nli"
