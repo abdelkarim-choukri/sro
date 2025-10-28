@@ -5,6 +5,7 @@ from __future__ import annotations
 # === BOOTSTRAP: env + console + warning filters (must be before any HF/ST imports) ===
 import os, sys, warnings
 from pathlib import Path
+import json
 
 # Silence HF hub's deprecated message about local_dir_use_symlinks (it’s harmless noise)
 warnings.filterwarnings(

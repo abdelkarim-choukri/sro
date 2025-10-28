@@ -1,0 +1,22 @@
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = ["E", "F", "I", "UP"]
+ignore = [
+  "F401",  # allow re-exports in __init__.py
+"E501",
+]
+exclude = ["models_cache", "artifacts"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.coverage.run]
+branch = true
+source = ["sro", "scripts"]
+
+[tool.coverage.report]
+skip_empty = true
+show_missing = true
+fail_under = 85

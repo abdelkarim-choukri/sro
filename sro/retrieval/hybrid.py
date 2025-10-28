@@ -1,283 +1,583 @@
+# # sro/retrieval/hybrid.py
+# from __future__ import annotations
+# from typing import List, Tuple, Optional, Sequence, Union, Dict, Any
+# import os
+# import logging
+# import numpy as np
+
+# from sro.embeddings.backend import EmbeddingBackend
+# from sro.retrieval.redundancy import mmr_select_cosine
+
+# LOGGER = logging.getLogger("sro.retrieval.hybrid")
+
+
+# class SentenceCandidate:
+#     """
+#     Minimal carrier for retrieval + S2 that is also COMPATIBLE with older
+#     sro.prover.* code that expects extra fields.
+
+#     Fields used across code:
+#       - sent_id (str): stable id
+#       - text (str): sentence string
+#       - score (float): generic relevance (we store TF-IDF normalized here)
+#       - ce_score (float): cross-encoder score (legacy S2 sorts on this; default 0.0)
+#       - bm25 (float|None): optional bm25
+#       - dense (float|None): optional dense
+#       - source_id (str): provenance/document/source id (legacy S3 uses this); default "corpus"
+#       - rank (int): deterministic rank within the retrieval list (optional; default 0)
+#     """
+#     __slots__ = (
+#         "sent_id",
+#         "text",
+#         "score",
+#         "ce_score",
+#         "bm25",
+#         "dense",
+#         "source_id",
+#         "rank",
+#     )
+
+#     def __init__(
+#         self,
+#         sent_id: str,
+#         text: str,
+#         score: float,
+#         *,
+#         ce_score: Optional[float] = None,
+#         bm25: Optional[float] = None,
+#         dense: Optional[float] = None,
+#         source_id: Optional[str] = None,
+#         rank: int = 0,
+#     ):
+#         self.sent_id = sent_id
+#         self.text = text
+#         self.score = float(score)
+#         self.ce_score = 0.0 if ce_score is None else float(ce_score)
+#         self.bm25 = None if bm25 is None else float(bm25)
+#         self.dense = None if dense is None else float(dense)
+#         self.source_id = source_id if source_id is not None else "corpus"
+#         self.rank = int(rank)
+
+#     def __repr__(self) -> str:
+#         return f"SentenceCandidate(id={self.sent_id!r}, score={self.score:.3f}, ce={self.ce_score:.3f}, src={self.source_id})"
+
+
+# # ---------------------------
+# # 1) Initial retrieval (offline TF-IDF)
+# # ---------------------------
+
+# def _load_default_corpus() -> List[Tuple[str, str]]:
+#     """
+#     Load fallback corpus from data/corpus/sentences.txt (one sentence per line).
+#     Returns: list[(sent_id, text)]
+#     """
+#     default_path = os.path.join("data", "corpus", "sentences.txt")
+#     if not os.path.isfile(default_path):
+#         raise FileNotFoundError(
+#             "No corpus provided to get_initial_candidates() and default corpus not found.\n"
+#             f"Expected: {default_path}\n"
+#             "Pass an explicit 'corpus' argument: list[str] or list[(id,str)]"
+#         )
+#     out: List[Tuple[str, str]] = []
+#     with open(default_path, "r", encoding="utf-8") as f:
+#         for i, line in enumerate(f):
+#             s = line.strip()
+#             if not s:
+#                 continue
+#             out.append((f"s{i}", s))
+#     if not out:
+#         raise ValueError(f"Default corpus file is empty: {default_path}")
+#     return out
+
+
+# def _normalize_corpus(
+#     corpus: Optional[Sequence[Union[str, Tuple[str, str], SentenceCandidate]]]
+# ) -> List[Tuple[str, str]]:
+#     """
+#     Accept:
+#       - None -> load default
+#       - list[str]
+#       - list[(id, text)]
+#       - list[SentenceCandidate]
+#     Return list[(id, text)]
+#     """
+#     if corpus is None:
+#         return _load_default_corpus()
+#     if len(corpus) == 0:
+#         return []
+#     first = corpus[0]
+#     if isinstance(first, SentenceCandidate):
+#         return [(c.sent_id, c.text) for c in corpus]  # type: ignore
+#     if isinstance(first, tuple) and len(first) == 2 and all(isinstance(x, str) for x in first):
+#         return list(corpus)  # type: ignore
+#     if isinstance(first, str):
+#         return [(f"s{i}", t) for i, t in enumerate(corpus)]  # type: ignore
+#     raise TypeError("Unsupported corpus element type. Use list[str], list[(id,str)], or list[SentenceCandidate].")
+
+
+# def _infer_top_k(default_k: int, kwargs: Dict[str, Any]) -> int:
+#     """
+#     Compatible with callers that pass k_bm25/k_dense/k_rrf/k/top_k.
+#     We choose the max of any provided k-like args, else default_k.
+#     """
+#     candidates = []
+#     for key in ("k_rrf", "k_bm25", "k_dense", "top_k", "k"):
+#         if key in kwargs and kwargs[key] is not None:
+#             try:
+#                 candidates.append(int(kwargs[key]))
+#             except Exception:
+#                 pass
+#     k = max([default_k] + candidates) if candidates else default_k
+#     return max(1, k)
+
+
+# def get_initial_candidates(
+#     query: str,
+#     corpus: Optional[Sequence[Union[str, Tuple[str, str], SentenceCandidate]]] = None,  # allow 2nd positional
+#     *,
+#     top_k: Optional[int] = None,
+#     seed: int = 42,
+#     return_scores: bool = False,
+#     **kwargs: Any,
+# ) -> Union[List[SentenceCandidate], Tuple[List[SentenceCandidate], np.ndarray]]:
+#     """
+#     Offline initial retrieval using TF-IDF cosine similarity.
+
+#     Returns:
+#       candidates OR (candidates, p1_scores)
+#          candidates: List[SentenceCandidate] (len <= top_k)
+#          p1_scores : np.ndarray [len(candidates)] in [0,1]  (only if return_scores=True)
+#     """
+#     import random
+#     random.seed(seed)
+#     np.random.seed(seed)
+
+#     k = _infer_top_k(default_k=24 if top_k is None else int(top_k), kwargs=kwargs)
+
+#     items = _normalize_corpus(corpus)  # list[(id,text)]
+#     if len(items) == 0:
+#         return ([] if not return_scores else ([], np.zeros((0,), dtype=np.float32)))
+#     ids, texts = zip(*items)
+
+#     try:
+#         from sklearn.feature_extraction.text import TfidfVectorizer
+#         from sklearn.metrics.pairwise import linear_kernel
+#     except Exception as e:
+#         raise ImportError("scikit-learn is required for TF-IDF retrieval. `pip install scikit-learn`.") from e
+
+#     vec = TfidfVectorizer(ngram_range=(1, 2), min_df=1)
+#     X = vec.fit_transform(list(texts) + [query])  # last row is query
+#     X_docs = X[:-1]
+#     X_q = X[-1]
+
+#     sims = linear_kernel(X_docs, X_q)[:, 0]  # cosine
+#     if sims.size == 0:
+#         return ([] if not return_scores else ([], np.zeros((0,), dtype=np.float32)))
+
+#     smin, smax = float(np.min(sims)), float(np.max(sims))
+#     p1 = (sims - smin) / (smax - smin) if smax > smin else np.zeros_like(sims)
+
+#     order = np.lexsort((np.arange(len(p1)), -p1))
+#     top = order[: max(0, min(k, len(order)))]
+
+#     cands: List[SentenceCandidate] = [
+#     SentenceCandidate(
+#         ids[i],
+#         texts[i],
+#         float(p1[i]),
+#         ce_score=0.0,
+#         source_id="corpus",
+#         rank=ri,
+#     )
+#     for ri, i in enumerate(top)
+# ]
+
+#     p1_scores = np.asarray([p1[i] for i in top], dtype=np.float32)
+#     return (cands, p1_scores) if return_scores else cands
+
+
+# # ---------------------------
+# # 2) S2 frontier (cosine default, jaccard fallback)
+# # ---------------------------
+
+# _EMBED_BACKEND_SINGLETON: Optional[EmbeddingBackend] = None
+# def _get_embed_backend() -> EmbeddingBackend:
+#     global _EMBED_BACKEND_SINGLETON
+#     if _EMBED_BACKEND_SINGLETON is None:
+#         _EMBED_BACKEND_SINGLETON = EmbeddingBackend()
+#     return _EMBED_BACKEND_SINGLETON
+
+
+# def select_frontier_and_pool(
+#     candidates: List[SentenceCandidate],
+#     p1_scores: np.ndarray,
+#     M: int,
+#     L: int,
+#     *,
+#     mmr_lambda: float = 0.5,
+#     redundancy: str = "cosine",  # default cosine
+#     embed_backend: Optional[EmbeddingBackend] = None,
+# ) -> Tuple[List[int], List[int], np.ndarray]:
+#     """
+#     Select size-M frontier by MMR and size-L 2-hop pool.
+#     """
+#     N = len(candidates)
+#     assert p1_scores.shape == (N,), f"p1_scores must be shape ({N},)"
+
+#     if redundancy == "cosine":
+#         backend = embed_backend or _get_embed_backend()
+#         texts = [c.text for c in candidates]
+#         ids = [getattr(c, "sent_id", None) for c in candidates]
+#         out = mmr_select_cosine(
+#             texts, ids, p1_scores, M,
+#             mmr_lambda=mmr_lambda, sim_threshold=0.9, embed_backend=backend
+#         )
+#         frontier_idx: List[int] = out["selected_idx"]  # type: ignore
+#         max_sim: np.ndarray = out["max_sim"]  # type: ignore
+#         novelty: np.ndarray = out["novelty"]  # type: ignore
+
+#         remaining = [i for i in range(N) if i not in frontier_idx]
+#         pool_order = sorted(
+#             remaining,
+#             key=lambda i: (float(novelty[i]) * float(p1_scores[i]), float(p1_scores[i]), -i),
+#             reverse=True,
+#         )
+#         pool_idx = pool_order[: max(0, min(L, len(pool_order)))]
+#         return frontier_idx, pool_idx, max_sim
+
+#     # ---------- Legacy Jaccard fallback ----------
+#     def _token_set(s: str) -> set:
+#         return set(t.lower() for t in s.split())
+
+#     texts = [c.text for c in candidates]
+#     sets = [_token_set(t) for t in texts]
+#     max_j = np.zeros((N,), dtype=np.float32)
+#     frontier_idx: List[int] = []
+#     selected = np.zeros((N,), dtype=bool)
+
+#     def _jacc(a: set, b: set) -> float:
+#         if not a and not b:
+#             return 0.0
+#         inter = len(a & b)
+#         union = len(a | b)
+#         return float(inter) / float(union) if union > 0 else 0.0
+
+#     for _ in range(min(M, N)):
+#         best_i, best_mmr = -1, -1e9
+#         for i in range(N):
+#             if selected[i]:
+#                 continue
+#             mmr = mmr_lambda * float(p1_scores[i]) - (1.0 - mmr_lambda) * float(max_j[i])
+#             if (mmr > best_mmr) or \
+#                (mmr == best_mmr and p1_scores[i] > (p1_scores[best_i] if best_i >= 0 else -1e9)) or \
+#                (mmr == best_mmr and p1_scores[i] == (p1_scores[best_i] if best_i >= 0 else -1e9) and i < best_i):
+#                 best_i, best_mmr = i, mmr
+#         if best_i < 0:
+#             break
+#         frontier_idx.append(best_i)
+#         selected[best_i] = True
+#         for i in range(N):
+#             if selected[i]:
+#                 continue
+#             j = _jacc(sets[i], sets[best_i])
+#             if j > max_j[i]:
+#                 max_j[i] = j
+
+#     novelty = 1.0 - max_j
+#     remaining = [i for i in range(N) if i not in frontier_idx]
+#     pool_order = sorted(
+#         remaining,
+#         key=lambda i: (float(novelty[i]) * float(p1_scores[i]), float(p1_scores[i]), -i),
+#         reverse=True,
+#     )
+#     pool_idx = pool_order[: max(0, min(L, len(pool_order)))]
+#     return frontier_idx, pool_idx, max_j
 # sro/retrieval/hybrid.py
+# sro/retrieval/hybrid.py
+"""
+Does:
+    Retrieval helpers + frontier selection (S2) with cosine redundancy (default) and
+    a legacy Jaccard fallback. Also provides minimal candidate fetchers used by scripts/tests.
+
+Inputs:
+    - Corpus path: either a newline TXT ("one sentence per line") or JSONL where each line is
+      {"source_id": str, "text": str}. JSONL "text" is split to sentences heuristically.
+    - p1_scores: numpy array of 1-hop scores aligned with `candidates`.
+
+Outputs:
+    - select_frontier_and_pool(...) -> (frontier_idx, pool_idx, max_sim_array)
+    - get_initial_candidates(corpus_path, query, ...) -> List[SentenceCandidate]
+    - make_fetch_more(corpus_path) -> closure(k, exclude_ids) -> List[SentenceCandidate]
+
+Notes:
+    - Pure logic, deterministic tie-breaks.
+    - Embeddings are cached by EmbeddingBackend (LRU + sqlite).
+"""
+
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import List, Dict, Tuple, Set, Optional
+
 import json
-import math
 import re
-import os
-import torch
-from sro.utils.st import get_st
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Iterable, List, Optional, Tuple
+
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
-from sro.types import SentenceCandidate
-from sro.retrieval.bm25 import BM25OkapiLite
+from sro.embeddings.backend import EmbeddingBackend
+from sro.retrieval.redundancy import mmr_select_cosine
 
-_WORD_RE = re.compile(r"[A-Za-z0-9]+")
 
-def _tokens(s: str) -> List[str]:
-    if not isinstance(s, str):
-        return []
-    return [t.lower() for t in _WORD_RE.findall(s)]
-
-def _split_sentences(text: str) -> List[str]:
-    # Simple rule-based splitter; good enough for newsy prose
-    # Splits on [.?!] followed by space and capital or EOS.
-    if not text:
-        return []
-    parts = re.split(r"(?<=[\.!?])\s+(?=[A-Z\"'])", text.strip())
-    # Fallback if none found
-    if len(parts) == 1:
-        return [text.strip()]
-    # Clean
-    return [p.strip() for p in parts if p.strip()]
-
-def _jaccard(a: Set[str], b: Set[str]) -> float:
-    if not a and not b:
-        return 0.0
-    inter = len(a & b)
-    union = len(a | b)
-    return inter / union if union else 0.0
+# ---------- Public candidate type ----------
 
 @dataclass
-class SentenceRow:
+class SentenceCandidate:
     sent_id: str
-    source_id: str
     text: str
-    tokens: List[str]
+    score: float = 0.0
+    source_id: str = "corpus:0"
+    ce_score: float = 0.0  # cross-encoder score if available
 
-class CorpusIndex:
+
+# ---------- Embedding backend singleton ----------
+
+_EMBED_BACKEND_SINGLETON: Optional[EmbeddingBackend] = None
+
+
+def _get_embed_backend() -> EmbeddingBackend:
+    global _EMBED_BACKEND_SINGLETON
+    if _EMBED_BACKEND_SINGLETON is None:
+        _EMBED_BACKEND_SINGLETON = EmbeddingBackend()
+    return _EMBED_BACKEND_SINGLETON
+
+
+# ---------- Corpus readers ----------
+
+_SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
+
+
+def _read_corpus_lines(corpus_path: Path) -> list[tuple[str, str, str]]:
     """
-    Loads a JSONL corpus with fields:
-      - source_id: str
-      - text: str  (document text; we will split into sentences)
-
-    Produces a sentence table, BM25 index, and exposes dense encoding.
+    Returns list of tuples: (sent_id, source_id, text)
+    Supports:
+      - TXT: one sentence per line
+      - JSONL: {"source_id": "...", "text": "..."} (split to sentences)
     """
-    def __init__(self, jsonl_path: str):
-        self.jsonl_path = jsonl_path
-        self.rows: List[SentenceRow] = []
-        self._load()
-        self._build_bm25()
-        self._dense_model: Optional[SentenceTransformer] = None
-        self._dense_matrix: Optional[np.ndarray] = None  # [N, d]
-
-    def _load(self) -> None:
-        if not os.path.exists(self.jsonl_path):
-            raise FileNotFoundError(f"Corpus JSONL not found: {self.jsonl_path}")
-        with open(self.jsonl_path, "r", encoding="utf-8") as f:
-            for line in f:
-                if not line.strip():
-                    continue
-                obj = json.loads(line)
-                source_id = obj.get("source_id", "")
-                text = obj.get("text", "")
-                sents = _split_sentences(text)
-                for k, sent in enumerate(sents):
-                    sid = f"{source_id}#s{k}"
-                    self.rows.append(SentenceRow(sent_id=sid, source_id=source_id, text=sent, tokens=_tokens(sent)))
-
-    def _build_bm25(self) -> None:
-        self._bm25 = BM25OkapiLite([r.tokens for r in self.rows])
-
-    # ---- Dense ----
-    def ensure_dense(self) -> None:
-        """Lazy-init the dense encoder once."""
-        if self._dense_model is None:
-            model_id = getattr(self, "dense_model_name", None) or "sentence-transformers/all-MiniLM-L6-v2"
-            
-            # cache_folder ensures local reuse; device is explicit
-            self._dense_model = get_st(model_id)
-
-        if self._dense_matrix is None:
-            texts = [r.text for r in self.rows]
-            self._dense_matrix = self._dense_model.encode(
-                texts,
-                convert_to_numpy=True,
-                batch_size=128,            # lower to 32 if VRAM is tight
-                show_progress_bar=False,
-                normalize_embeddings=True, # cosine == dot
-            )
-
-
-    def dense_query(self, query: str) -> np.ndarray:
-        assert self._dense_model is not None
-        vec = self._dense_model.encode([query], convert_to_numpy=True, batch_size=1, show_progress_bar=False, normalize_embeddings=True)
-        return vec[0]
-
-    # ---- Retrieval ----
-    def search(self,
-               query: str,
-               k_bm25: int = 200,
-               k_dense: int = 200,
-               k_fused: int = 128,
-               mmr_lambda: float = 0.7,
-               rrf_c: int = 60,
-               use_cross_encoder: bool = False,
-               cross_encoder=None,
-               rerank_top: int = 64) -> List[SentenceCandidate]:
-        """
-        Return top-k_fused SentenceCandidate for a query using BM25 + Dense + RRF + MMR (+ optional cross-encoder rerank).
-
-        Variables:
-          k_bm25: number of BM25 hits to keep before fusion.
-          k_dense: number of dense hits to keep before fusion.
-          k_fused: final pool size after RRF + MMR.
-          mmr_lambda (λ): trade-off for MMR selection.
-          rrf_c: RRF constant (larger → more uniform).
-          use_cross_encoder: if True, apply cross-encoder rerank on top 'rerank_top' sentences.
-        """
-        # BM25
-        q_tokens = _tokens(query)
-        bm25_scores = self._bm25.get_scores(q_tokens)
-        # get top-k_bm25 indices
-        idx_bm = np.argsort(np.array(bm25_scores))[::-1][:min(k_bm25, len(self.rows))]
-
-        # Dense
-        self.ensure_dense()
-        qvec = self.dense_query(query)
-        sims = (self._dense_matrix @ qvec)  # cosine since normalized
-        idx_de = np.argsort(sims)[::-1][:min(k_dense, len(self.rows))]
-
-        # Fusion via RRF
-        # Build rank maps
-        rank_bm = {int(i): r for r, i in enumerate(idx_bm, start=1)}
-        rank_de = {int(i): r for r, i in enumerate(idx_de, start=1)}
-        cand_ids = set(rank_bm) | set(rank_de)
-
-        def rrf_score(i: int) -> float:
-            rb = rank_bm.get(i)
-            rd = rank_de.get(i)
-            s = 0.0
-            if rb is not None:
-                s += 1.0 / (rrf_c + rb)
-            if rd is not None:
-                s += 1.0 / (rrf_c + rd)
-            return s
-
-        # sort by RRF desc
-        fused = sorted(cand_ids, key=lambda i: rrf_score(i), reverse=True)
-
-        # MMR on fused list to enforce novelty
-        selected: List[int] = []
-        tok_sets: List[Set[str]] = [set(self.rows[i].tokens) for i in fused]
-        while fused and len(selected) < min(k_fused, len(self.rows)):
-            # pick the next best by MMR
-            best_i, best_sc = None, -1e9
-            for pos, idx in enumerate(fused):
-                # relevance proxy: combined signal (bm25 norm + dense sim norm)
-                rb = rank_bm.get(idx, len(self.rows))
-                rd = rank_de.get(idx, len(self.rows))
-                rel = (1.0 / (rrf_c + rb)) + (1.0 / (rrf_c + rd))
-                if not selected:
-                    mmr = rel
-                else:
-                    # redundancy: max Jaccard vs selected
-                    toks_i = tok_sets[pos]
-                    max_sim = 0.0
-                    for sel in selected:
-                        toks_j = set(self.rows[sel].tokens)
-                        # Jaccard similarity
-                        inter = len(toks_i & toks_j)
-                        uni = len(toks_i | toks_j)
-                        s = (inter / uni) if uni else 0.0
-                        if s > max_sim:
-                            max_sim = s
-                    mmr = mmr_lambda * rel - (1.0 - mmr_lambda) * max_sim
-                if mmr > best_sc:
-                    best_sc, best_i = mmr, idx
-            selected.append(best_i)
-            # remove best_i from fused list
-            fused = [i for i in fused if i != best_i]
-
-        # Optionally rerank with cross-encoder
-        final_idx = selected[:]
-        if use_cross_encoder and cross_encoder is not None:
-            texts = [self.rows[i].text for i in final_idx[:rerank_top]]
-            scores = cross_encoder.score_pairs([query] * len(texts), texts)  # higher is better
-            order = np.argsort(np.array(scores))[::-1]
-            # apply rerank within rerank_top window
-            reranked = [final_idx[i] for i in order] + final_idx[len(order):]
-            final_idx = reranked
-
-        # Build SentenceCandidate list
-        out: List[SentenceCandidate] = []
-        # Normalize a composite ce_score into [0,1] for downstream (simple min-max)
-        # Use rel (same formula as above) as ce_score base
-        rel_vals = []
-        for idx in final_idx:
-            rb = rank_bm.get(idx, len(self.rows))
-            rd = rank_de.get(idx, len(self.rows))
-            rel_vals.append((1.0 / (rrf_c + rb)) + (1.0 / (rrf_c + rd)))
-        if rel_vals:
-            rmin, rmax = min(rel_vals), max(rel_vals)
-        else:
-            rmin, rmax = 0.0, 1.0
-
-        for k, idx in enumerate(final_idx):
-            row = self.rows[idx]
-            rel = rel_vals[k] if k < len(rel_vals) else 0.0
-            ce = 0.0 if rmax == rmin else (rel - rmin) / (rmax - rmin)
-            out.append(SentenceCandidate(sent_id=row.sent_id, text=row.text, source_id=row.source_id, ce_score=float(ce)))
+    out: list[tuple[str, str, str]] = []
+    if not corpus_path.exists():
         return out
 
-# Convenience factory to build a fetch_more callback usable by SROProver
-def make_fetch_more(corpus_jsonl: str,
-                    use_cross_encoder: bool = False,
-                    cross_encoder=None,
-                    k_fused: int = 24) -> callable:
-    """
-    Return a fetch_more(claim=..., **kwargs) callback that returns
-    up to k_fused SentenceCandidate from the corpus for the given claim string.
-    only if S8 (alternation) triggers it.
-    """
-    index = CorpusIndex(corpus_jsonl)
-    def _fetch_more(**kwargs):
-        # kwargs may include: claim, candidates, frontier_idx, pool2_idx, p1, top_ub
-        claim_text = kwargs.get("claim", "")
-        return index.search(claim_text,
-                            k_bm25=200,
-                            k_dense=200,
-                            k_fused=k_fused,
-                            mmr_lambda=0.7,
-                            rrf_c=60,
-                            use_cross_encoder=use_cross_encoder,
-                            cross_encoder=cross_encoder,
-                            rerank_top=min(64, k_fused))
-    return _fetch_more
+    if corpus_path.suffix.lower() == ".jsonl":
+        with corpus_path.open("r", encoding="utf-8") as f:
+            for doc_idx, line in enumerate(f):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                text = (obj.get("text") or "").strip()
+                if not text:
+                    continue
+                src = str(obj.get("source_id") or f"doc:{doc_idx}")
+                sents = [s.strip() for s in _SENT_SPLIT.split(text) if s.strip()]
+                for si, s in enumerate(sents):
+                    sid = f"{src}#s{si}"
+                    out.append((sid, src, s))
+    else:
+        # default: TXT
+        with corpus_path.open("r", encoding="utf-8") as f:
+            for i, line in enumerate(f):
+                s = line.strip()
+                if not s:
+                    continue
+                sid = f"s{i}"
+                out.append((sid, "corpus:0", s))
+    return out
 
+
+# ---------- Frontier selection (S2) ----------
+
+def select_frontier_and_pool(
+    candidates: List[SentenceCandidate],
+    p1_scores: np.ndarray,
+    M: int,
+    L: int,
+    *,
+    mmr_lambda: float = 0.5,
+    redundancy: str = "cosine",  # default cosine
+    embed_backend: Optional[EmbeddingBackend] = None,
+) -> Tuple[List[int], List[int], np.ndarray]:
+    """
+    Select size-M frontier by MMR and size-L 2-hop pool.
+    Default redundancy = cosine; 'jaccard' kept as fallback.
+
+    Returns:
+        frontier_idx: indices of selected frontier (len ≤ M)
+        pool_idx: indices for 2-hop pool (len ≤ L, disjoint from frontier)
+        max_sim: array[N] of max similarity to any selected frontier (cos or jacc)
+
+    Invariants:
+        - p1_scores.shape == (N,)
+        - Deterministic tie-breaking: higher p1, then lower index.
+    """
+    N = len(candidates)
+    assert p1_scores.shape == (N,), f"p1_scores must be shape ({N},)"
+
+    if redundancy == "cosine":
+        backend = embed_backend or _get_embed_backend()
+        texts = [c.text for c in candidates]
+        ids = [getattr(c, "sent_id", None) for c in candidates]
+        out = mmr_select_cosine(
+            texts, ids, p1_scores, M,
+            mmr_lambda=mmr_lambda, sim_threshold=0.9, embed_backend=backend
+        )
+        frontier_idx: List[int] = out["selected_idx"]  # type: ignore
+        max_sim: np.ndarray = out["max_sim"]  # type: ignore
+        novelty: np.ndarray = out["novelty"]  # type: ignore
+
+        remaining = [i for i in range(N) if i not in frontier_idx]
+        pool_order = sorted(
+            remaining,
+            key=lambda i: (float(novelty[i]) * float(p1_scores[i]), float(p1_scores[i]), -i),
+            reverse=True,
+        )
+        pool_idx = pool_order[: max(0, min(L, len(pool_order)))]
+        return frontier_idx, pool_idx, max_sim
+
+    # ---------- Legacy Jaccard fallback ----------
+    def _token_set(s: str) -> set[str]:
+        return set(t.lower() for t in s.split())
+
+    texts = [c.text for c in candidates]
+    sets = [_token_set(t) for t in texts]
+    max_j = np.zeros((N,), dtype=np.float32)
+    frontier_idx: List[int] = []
+    selected = np.zeros((N,), dtype=bool)
+
+    def _jacc(a: set[str], b: set[str]) -> float:
+        if not a and not b:
+            return 0.0
+        inter = len(a & b)
+        union = len(a | b)
+        return float(inter) / float(union) if union > 0 else 0.0
+
+    for _ in range(min(M, N)):
+        best_i, best_mmr = -1, -1e9
+        for i in range(N):
+            if selected[i]:
+                continue
+            mmr = mmr_lambda * float(p1_scores[i]) - (1.0 - mmr_lambda) * float(max_j[i])
+            if (mmr > best_mmr) or \
+               (mmr == best_mmr and p1_scores[i] > (p1_scores[best_i] if best_i >= 0 else -1e9)) or \
+               (mmr == best_mmr and p1_scores[i] == (p1_scores[best_i] if best_i >= 0 else -1e9) and i < best_i):
+                best_i, best_mmr = i, mmr
+        if best_i < 0:
+            break
+        frontier_idx.append(best_i)
+        selected[best_i] = True
+        for i in range(N):
+            if selected[i]:
+                continue
+            j = _jacc(sets[i], sets[best_i])
+            if j > max_j[i]:
+                max_j[i] = j
+
+    novelty = 1.0 - max_j
+    remaining = [i for i in range(N) if i not in frontier_idx]
+    pool_order = sorted(
+        remaining,
+        key=lambda i: (float(novelty[i]) * float(p1_scores[i]), float(p1_scores[i]), -i),
+        reverse=True,
+    )
+    pool_idx = pool_order[: max(0, min(L, len(pool_order)))]
+    return frontier_idx, pool_idx, max_j
+
+
+# ---------- Minimal retrieval helpers ----------
 
 def get_initial_candidates(
-    corpus_jsonl: str,
-    query: str,
+    corpus_path: str | Path,
+    query: Optional[str] = None,
     *,
-    k_bm25: int = 200,
-    k_dense: int = 200,
-    k_fused: int = 24,
-    mmr_lambda: float = 0.7,
-    rrf_c: int = 60,
-    use_cross_encoder: bool = False,
-    cross_encoder=None,
-    rerank_top: int = 64,
-):
+    k_bm25: int = 128,
+    k_ce: int = 32,
+    k_dense: int = 128,          # <- accept k_dense
+    limit: int = 256,
+    **_: object,                 # <- swallow any other future kwargs
+) -> List[SentenceCandidate]:
     """
-    First-pass retrieval for initial candidate pool.
+    Return up to `limit` candidates from the corpus, ignoring query (BM25/CE/DENSE are placeholders).
+    Deterministic order based on corpus content.
 
-    Inputs:
-      query: claim text (string).
-    Returns:
-      List[SentenceCandidate] of length ≤ k_fused, with ce_score ∈ [0,1].
+    Args:
+        corpus_path: TXT/JSONL path
+        query:       unused placeholder (kept for signature compatibility)
+        k_bm25/k_ce/k_dense: accepted but not used (for API compatibility)
+        limit:       max number of candidates
+        **_:         ignored extra keyword args (forward-compat)
     """
-    index = CorpusIndex(corpus_jsonl)
-    return index.search(
-        query,
-        k_bm25=k_bm25,
-        k_dense=k_dense,
-        k_fused=k_fused,
-        mmr_lambda=mmr_lambda,
-        rrf_c=rrf_c,
-        use_cross_encoder=use_cross_encoder,
-        cross_encoder=cross_encoder,
-        rerank_top=rerank_top,
-    )
+    p = Path(corpus_path)
+    triples = _read_corpus_lines(p)
+    out: List[SentenceCandidate] = []
+    for sid, src, text in triples[: max(0, int(limit))]:
+        out.append(SentenceCandidate(sent_id=sid, text=text, source_id=src, score=0.0, ce_score=0.0))
+    return out
+
+
+# --- add or replace this function in sro/retrieval/hybrid.py ---
+from pathlib import Path
+from typing import Callable, List, Optional
+
+def make_fetch_more(
+    corpus_path: str | Path,
+    *,
+    k_fused: int = 24,
+    use_cross_encoder: bool = False,
+    cross_encoder: object | None = None,
+    rerank_top: int = 50,
+    **_: object,
+) -> Callable[..., List[SentenceCandidate]]:
+    """
+    Return a fetch-more function that supports BOTH signatures:
+      (already_selected: List[SentenceCandidate], n_more: int) -> List[SentenceCandidate]
+      (k: int, exclude_ids: Optional[Iterable[str]]) -> List[SentenceCandidate]
+    We ignore CE-related kwargs in this offline demo.
+    """
+    triples = _read_corpus_lines(Path(corpus_path))
+
+    def _by_exclude(k: int, exclude_ids: Optional[Iterable[str]] = None) -> List[SentenceCandidate]:
+        k = max(0, int(k))
+        excl = set(exclude_ids or [])
+        out: List[SentenceCandidate] = []
+        for sid, src, text in triples:
+            if sid in excl:
+                continue
+            out.append(SentenceCandidate(sent_id=sid, text=text, source_id=src))
+            if len(out) >= k:
+                break
+        return out
+
+    def _by_already(already: List[SentenceCandidate], n_more: int) -> List[SentenceCandidate]:
+        have = {c.sent_id for c in already}
+        out: List[SentenceCandidate] = []
+        for sid, src, text in triples:
+            if sid in have:
+                continue
+            out.append(SentenceCandidate(sent_id=sid, text=text, source_id=src))
+            if len(out) >= max(0, int(n_more)):
+                break
+        return out
+
+    def _fn(*args, **kwargs) -> List[SentenceCandidate]:
+        if len(args) >= 2 and isinstance(args[0], list):
+            return _by_already(args[0], int(args[1]))
+        if len(args) >= 1:
+            k = int(args[0])
+            excl = args[1] if len(args) >= 2 else None
+            return _by_exclude(k, excl)
+        # default: nothing requested
+        return []
+
+    return _fn

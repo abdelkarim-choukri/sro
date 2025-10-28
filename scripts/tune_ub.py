@@ -1,176 +1,96 @@
 # scripts/tune_ub.py
+"""
+Does:
+    Evaluate a saved learned UB on a dataset (held-out preferred).
+    Uses the feature list saved in the UB meta by default.
+
+CLI:
+    python -m scripts.tune_ub --input data/processed/dev_pairs.csv --conformal
+    # or override features explicitly:
+    python -m scripts.tune_ub --input ... --features p1_i,p1_j,...
+"""
+
 from __future__ import annotations
-import argparse, csv, json
-from pathlib import Path
-from typing import Dict, List, Optional
+
+import argparse
+import logging
+import os
+from typing import Tuple
 
 import numpy as np
+import pandas as pd
 
-from sro.config import load_config, apply_env_overrides
-from sro.prover.s4_ub import upper_bound, UBWeights, clamp01
+from sro.prover.ub_model import (
+    ConformalUB,
+    build_feature_matrix,
+    compute_coverage,
+    DEFAULT_FEATURES,
+)
 
-KNOWN_FEATS = {
-    "max_p1","entity_overlap","time_agreement","distance","novelty","ce_max",
-    "negation_conflict","source_diversity",
-}
+logging.basicConfig(
+    level=os.environ.get("SRO_LOGLEVEL", "INFO"),
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+LOGGER = logging.getLogger("scripts.tune_ub")
 
-def _to_float(x: object, default: float = 0.0) -> float:
-    try:
-        if x is None: return default
-        return float(x)
-    except Exception:
-        return default
 
-def _parse_feats_from_row(row: Dict[str, str]) -> Dict[str, float]:
-    feats: Dict[str, float] = {}
-    # explicit columns first
-    for k in KNOWN_FEATS:
-        if k in row and row[k] not in (None, ""):
-            feats[k] = _to_float(row[k], 0.0)
-    if feats:
-        return feats
-    # JSON blob fallback
-    for key in ("feats","features","feats_json","features_json"):
-        raw = row.get(key)
-        if not raw: continue
-        try:
-            d = json.loads(raw)
-            if isinstance(d, dict):
-                for k, v in d.items():
-                    if k in KNOWN_FEATS:
-                        feats[k] = _to_float(v, 0.0)
-                if feats:
-                    return feats
-        except Exception:
-            pass
-    return feats
+def _resolve_features_arg(arg_val: str, conf: ConformalUB) -> Tuple[str, tuple]:
+    """
+    Returns (origin, feature_names) where origin in {"model","arg","default"}.
+    - If arg_val is empty or "auto": use conf.feature_names if present; else DEFAULT_FEATURES.
+    - Else: parse arg_val as CSV list.
+    """
+    if not arg_val or arg_val.strip().lower() == "auto":
+        if conf.feature_names:
+            return "model", tuple(conf.feature_names)
+        else:
+            return "default", DEFAULT_FEATURES
+    feats = tuple([s.strip() for s in arg_val.split(",") if s.strip()])
+    return "arg", feats
 
-def _pick_p2(row: Dict[str, str]) -> Optional[float]:
-    for key in ("p2","p_entail","p_true","p","score"):
-        if key in row and row[key] not in (None, ""):
-            return _to_float(row[key], None)
-    return None
 
-def _pick_ub_column(row: Dict[str, str]) -> Optional[float]:
-    for key in ("UB","ub","upper_bound"):
-        if key in row and row[key] not in (None, ""):
-            return _to_float(row[key], None)
-    return None
-
-def _load_pairs(path: Path) -> List[Dict[str, str]]:
-    with path.open("r", encoding="utf-8") as f:
-        return [dict(r) for r in csv.DictReader(f)]
-
-# Be compatible with positional/keyword UB signatures
-def _UB(feats: Dict[str, float], kappa: float, w: UBWeights) -> float:
-    try:
-        return upper_bound(feats, kappa, w)  # positional
-    except TypeError:
-        return upper_bound(feats, kappa=kappa, ub_weights=w)  # keyword
-
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input", type=str, required=True,
-                    help="CSV of dev pairs (needs p2 and S3 features or a feats JSON).")
-    ap.add_argument("--kappa", type=float, default=None,
-                    help="κ to evaluate; default = cfg.sro_prover.kappa (after env overrides).")
-    ap.add_argument("--target", type=float, default=0.975,
-                    help="Target coverage for p2 ≤ UB(κ).")
-    ap.add_argument("--print_samples", type=int, default=0,
-                    help="Print this many worst offenders (p2-UB).")
+    ap.add_argument("--input", type=str, required=True)
+    ap.add_argument("--model_dir", type=str, default="artifacts/ub")
+    ap.add_argument("--features", type=str, default="auto", help="CSV list or 'auto' to use model's feature_names")
+    ap.add_argument("--conformal", action="store_true", help="prints alpha and q_hat from meta")
     args = ap.parse_args()
 
-    cfg = load_config()
-    apply_env_overrides(cfg)
-    kappa = float(args.kappa) if args.kappa is not None else float(cfg.sro_prover.kappa)
-    target = float(args.target)
+    # Load model first so we know its feature_names
+    conf = ConformalUB.load(args.model_dir)
 
-    rows = _load_pairs(Path(args.input))
-    if not rows:
-        print(json.dumps({"error":"no_rows"}, ensure_ascii=False)); return
+    # Load data
+    df = pd.read_csv(args.input)
+    if "y_true" not in df.columns:
+        raise KeyError("Input CSV must contain 'y_true' column.")
 
-    w = UBWeights()
-    p2_list: List[float] = []
-    ub0_list: List[Optional[float]] = []
-    ubk_list: List[float] = []
-    used_fallback = False
+    origin, feature_names = _resolve_features_arg(args.features, conf)
+    X = build_feature_matrix(df, feature_names)
+    y = df["y_true"].to_numpy(dtype="float32")
 
-    for r in rows:
-        p2 = _pick_p2(r)
-        if p2 is None:
-            continue
-        feats = _parse_feats_from_row(r)
-        if feats:
-            ub0 = clamp01(_UB(feats, 0.0, w))
-            ubk = clamp01(_UB(feats, kappa, w))
-        else:
-            ub_from_col = _pick_ub_column(r)
-            if ub_from_col is None:
-                continue
-            ub0 = None
-            ubk = clamp01(_to_float(ub_from_col, 0.0))
-            used_fallback = True
+    # Predict UB with optional floor if present in features (rare in your setup)
+    floor = None
+    if "best_so_far" in feature_names:
+        floor = X[:, feature_names.index("best_so_far")]
+    ub = conf.predict_upper_bound(X, floor=floor)
 
-        p2_list.append(float(p2))
-        ub0_list.append(ub0)
-        ubk_list.append(ubk)
+    # Metrics
+    cov = compute_coverage(y, ub)
+    gap = ub - y
+    LOGGER.info(
+        "Coverage: %.2f%% (target: >= %.2f%%) | Features: %s (%s)",
+        cov * 100.0, (1.0 - conf.alpha) * 100.0, ",".join(feature_names), origin
+    )
+    LOGGER.info(
+        "Tightness: mean(UB - y)=%.4f  median=%.4f  p90=%.4f",
+        float(np.mean(gap)), float(np.median(gap)), float(np.quantile(gap, 0.90))
+    )
+    if args.conformal:
+        LOGGER.info("Conformal params: alpha=%.4f  q_hat=%.6f", conf.alpha, conf.q_hat)
 
-    N = len(p2_list)
-    if N == 0:
-        print(json.dumps({"error":"no_usable_rows"}, ensure_ascii=False)); return
+    print("COVERAGE=%.4f MEAN_GAP=%.4f MED_GAP=%.4f" % (cov, float(np.mean(gap)), float(np.median(gap))))
 
-    p2_arr = np.asarray(p2_list, dtype=np.float64)
-    ubk_arr = np.asarray(ubk_list, dtype=np.float64)
-
-    covered = (p2_arr <= ubk_arr + 1e-12)
-    coverage = float(np.mean(covered))
-    calib_error = float(np.mean(np.maximum(0.0, p2_arr - ubk_arr)))
-
-    # A) Suggestion from base UB(0)
-    deficits_base = []
-    for i in range(N):
-        ub0 = ub0_list[i]
-        if ub0 is not None:
-            d = max(0.0, p2_list[i] - ub0)
-        else:
-            approx_base = max(0.0, ubk_list[i] - kappa)
-            d = max(0.0, p2_list[i] - approx_base)
-        deficits_base.append(d)
-    q_needed_base = float(np.quantile(np.asarray(deficits_base, dtype=np.float64), target))
-    kappa_from_base = float(min(1.0, q_needed_base))
-
-    # B) Suggestion from current κ (increment by the target quantile of current gaps)
-    gaps_current = np.maximum(0.0, p2_arr - ubk_arr)
-    inc_needed = float(np.quantile(gaps_current, target))
-    kappa_from_current = float(min(1.0, kappa + inc_needed))
-
-    kappa_suggest = None
-    if coverage < target:
-        kappa_suggest = float(max(kappa, max(kappa_from_base, kappa_from_current)))
-
-    out = {
-        "N": N,
-        "coverage": coverage,
-        "target": target,
-        "calibration_error": calib_error,
-        "kappa_current": kappa,
-        "kappa_suggested": kappa_suggest,
-        "kappa_from_base": kappa_from_base,
-        "kappa_from_current": kappa_from_current,
-        "used_precomputed_ub_fallback": used_fallback,
-        "notes": (
-            "suggestion computed from both base UB(0) and current κ; choose the max"
-            if not used_fallback else
-            "approximate base used when features missing; current-κ suggestion valid"
-        ),
-    }
-    print(json.dumps(out, indent=2, sort_keys=False))
-
-    if args.print_samples > 0:
-        idx = np.argsort(gaps_current)[::-1]
-        print("WORST_UNDER_ESTIMATES (p2 - UB(kappa)):")
-        for j in idx[: min(args.print_samples, N)]:
-            print(f"  #{j}: p2={p2_arr[j]:.4f} ubk={ubk_arr[j]:.4f} gap={gaps_current[j]:.4f}")
 
 if __name__ == "__main__":
     main()
