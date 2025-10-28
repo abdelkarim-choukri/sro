@@ -227,7 +227,7 @@ import os
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, List, Optional
 
 _LOG = logging.getLogger(__name__)
 
@@ -253,12 +253,12 @@ __all__ = ["upper_bound", "UBWeights", "clamp01"]
 
 # --------------------- learned UB state ---------------------
 
-_UB_DIR: Optional[Path] = None
+_UB_DIR: Path | None = None
 _ALPHA: float = 0.025
 _Q_HAT: float = 0.0
 _MODEL_OK: bool = False
-_FEATURES: Optional[List[str]] = None
-_MODEL: Optional[Any] = None
+_FEATURES: list[str] | None = None
+_MODEL: Any | None = None
 
 
 def _load_learned_ub() -> None:
@@ -336,9 +336,9 @@ def _load_learned_ub() -> None:
         )
 
 
-def _build_vector(feats: Dict[str, Any], names: List[str]) -> List[float]:
+def _build_vector(feats: dict[str, Any], names: list[str]) -> list[float]:
     """Order features according to names; use 0.0 for missing/invalid."""
-    x: List[float] = []
+    x: list[float] = []
     for n in names:
         try:
             v = float(feats.get(n, 0.0))
@@ -349,11 +349,11 @@ def _build_vector(feats: Dict[str, Any], names: List[str]) -> List[float]:
 
 
 def upper_bound(
-    pair_features: Dict[str, Any],
+    pair_features: dict[str, Any],
     *args: Any,
     kappa: float = 0.0,
-    ub_weights: Optional[UBWeights] = None,
-    w: Optional[UBWeights] = None,
+    ub_weights: UBWeights | None = None,
+    w: UBWeights | None = None,
     **kwargs: Any,
 ) -> float:
     """

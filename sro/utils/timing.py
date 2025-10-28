@@ -1,6 +1,7 @@
 import time
 from contextlib import contextmanager
 
+
 class StageTimer:
     def __init__(self):
         self.t = {}  # stage -> seconds

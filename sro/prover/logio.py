@@ -1,9 +1,10 @@
 # sro/prover/logio.py
 from __future__ import annotations
-import os
+
 import json
-from pathlib import Path
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 
 DAY_FMT = "%Y-%m-%d"
 DEFAULT_MAX_MB = 20  # rotate when >20MB unless overridden

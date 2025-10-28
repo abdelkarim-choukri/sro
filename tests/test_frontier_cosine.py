@@ -1,7 +1,9 @@
 # tests/test_frontier_cosine.py
 import numpy as np
-from sro.retrieval.redundancy import mmr_select_cosine
+
 from sro.embeddings.backend import EmbeddingBackend
+from sro.retrieval.redundancy import mmr_select_cosine
+
 
 def test_mmr_cosine_filters_paraphrase(monkeypatch, tmp_path):
     # Work under temp to isolate cache

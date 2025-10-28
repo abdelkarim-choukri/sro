@@ -1,13 +1,15 @@
 # tests/ci/test_cpu_path.py
 import os
 
+
 def test_cpu_only_path_fast():
     # Enforce CPU-only execution
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
     os.environ["SRO_DEVICE"] = "cpu"
+    # Allow dummy NLI when the real model isn't available offline
+    os.environ["SRO_ALLOW_DUMMY_NLI"] = "1"
 
-    # Import here so the env vars take effect
-    from sro.nli.backend import NLIBackend  # type: ignore
+    from sro.nli.backend import NLIBackend  # import after env vars
 
     nli = NLIBackend()
     out = nli.score_pairs(["a"], ["a"], batch_size=1)

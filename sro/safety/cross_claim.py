@@ -42,7 +42,7 @@ class CrossClaimSafety:
     def reset(self) -> None:
         self.cmax_global = 0.0
 
-    def check(self, best: float, cmax_local: float) -> Dict[str, float | str]:
+    def check(self, best: float, cmax_local: float) -> dict[str, float | str]:
         """Compute margin and return a decision blob WITHOUT updating internal state."""
         b = max(0.0, min(1.0, float(best)))
         c_loc = max(0.0, min(1.0, float(cmax_local)))

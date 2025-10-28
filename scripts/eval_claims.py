@@ -1,13 +1,16 @@
 # scripts/eval_claims.py
 from __future__ import annotations
-import argparse, csv, json
+
+import argparse
+import csv
+import json
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 from sro.config import load_config
 from sro.prover import SROProver
-from sro.utils.random import set_all_seeds
 from sro.retrieval.hybrid import get_initial_candidates, make_fetch_more
+from sro.utils.random import set_all_seeds
 
 # Optional cross-encoder reranker (offline-capable; will silently skip if not available)
 try:
@@ -20,12 +23,12 @@ def _ensure_dir(p: Path) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
 
 
-def _read_csv(path: Path) -> List[Dict[str, str]]:
+def _read_csv(path: Path) -> list[dict[str, str]]:
     with path.open("r", encoding="utf-8", newline="") as f:
         return list(csv.DictReader(f))
 
 
-def _write_csv(path: Path, rows: List[Dict[str, Any]], fieldnames: List[str]) -> None:
+def _write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
     _ensure_dir(path)
     with path.open("w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
@@ -82,7 +85,7 @@ def main():
     out_path = Path(args.output)
     rows = _read_csv(in_path)
 
-    out_rows: List[Dict[str, Any]] = []
+    out_rows: list[dict[str, Any]] = []
     n = len(rows)
 
     # Metrics buckets

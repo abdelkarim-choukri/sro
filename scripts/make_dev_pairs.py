@@ -1,8 +1,13 @@
 # scripts/make_dev_pairs.py
 from __future__ import annotations
-import argparse, csv, json, os, sys
+
+import argparse
+import csv
+import json
+import os
+import sys
 from pathlib import Path
-from typing import List, Dict, Tuple
+from typing import Dict, List, Tuple
 
 # bootstrap: offline + utf-8
 try:
@@ -20,13 +25,15 @@ os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 from sro.config import load_config
-from sro.utils.random import set_all_seeds
-from sro.retrieval.hybrid import get_initial_candidates
-from sro.prover.s1_onehop import one_hop_scores as s1_one_hop
-from sro.prover.s2_frontier import select_frontier_and_pool, _tokens as s2_tokens
-from sro.prover.s3_features import build_pair_features
 from sro.nli.nli_infer import two_hop_scores
+from sro.prover.s1_onehop import one_hop_scores as s1_one_hop
+from sro.prover.s2_frontier import _tokens as s2_tokens
+from sro.prover.s2_frontier import select_frontier_and_pool
+from sro.prover.s3_features import build_pair_features
+from sro.retrieval.hybrid import get_initial_candidates
 from sro.types import SentenceCandidate
+from sro.utils.random import set_all_seeds
+
 
 def _ensure_demo_corpus(corpus_path: Path) -> None:
     corpus_path.parent.mkdir(parents=True, exist_ok=True)
@@ -45,13 +52,13 @@ def _ensure_demo_corpus(corpus_path: Path) -> None:
         for d in docs:
             f.write(json.dumps(d, ensure_ascii=False) + "\n")
 
-def _read_dev_claims(path: Path) -> List[Dict[str, str]]:
+def _read_dev_claims(path: Path) -> list[dict[str, str]]:
     with path.open("r", encoding="utf-8") as f:
         rd = csv.DictReader(f)
         return [dict(r) for r in rd]
 
-def _bruteforce_pairs(idx: List[int], cap: int) -> List[Tuple[int, int]]:
-    out: List[Tuple[int, int]] = []
+def _bruteforce_pairs(idx: list[int], cap: int) -> list[tuple[int, int]]:
+    out: list[tuple[int, int]] = []
     n = len(idx)
     if n < 2:
         return out
@@ -107,7 +114,7 @@ def main():
                 continue
 
             # Retrieval
-            cands: List[SentenceCandidate] = get_initial_candidates(
+            cands: list[SentenceCandidate] = get_initial_candidates(
                 str(corpus_path), claim_text,
                 k_bm25=cfg.retrieval.k_bm25,
                 k_dense=cfg.retrieval.k_dense,
@@ -135,7 +142,7 @@ def main():
 
             # Minimality filter
             tau1 = float(cfg.sro_prover.tau1)
-            keep: List[int] = [
+            keep: list[int] = [
                 k for k, (i, j) in enumerate(pairs)
                 if (i < len(p1) and j < len(p1)) and (p1[i] < tau1 and p1[j] < tau1)
             ]
@@ -154,7 +161,7 @@ def main():
                     )
                     # Map available features for the brute-forced pairs
                     # (build_pair_features will typically include these combos; if not, fallback to a minimal feat dict)
-                    feat_map: Dict[Tuple[int, int], Dict[str, float]] = {}
+                    feat_map: dict[tuple[int, int], dict[str, float]] = {}
                     for (a, b), F in zip(pairs2, feats2):
                         feat_map[(a, b)] = F
                         feat_map[(b, a)] = F
@@ -188,7 +195,7 @@ def main():
             feats_kept = [feats[k] for k in keep]
 
             # p2 via two-hop MNLI
-            text_pairs: List[Tuple[str, str]] = [(cands[i].text, cands[j].text) for (i, j) in pairs_kept]
+            text_pairs: list[tuple[str, str]] = [(cands[i].text, cands[j].text) for (i, j) in pairs_kept]
             p2 = two_hop_scores(claim_text, text_pairs, batch_size=args.bs2)
 
             # write rows

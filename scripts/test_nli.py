@@ -6,7 +6,9 @@ Run:
 """
 
 from __future__ import annotations
+
 from sro.nli.nli_infer import one_hop_scores, two_hop_scores
+
 
 def main():
     claim = "The iPhone 15 was released in 2023."

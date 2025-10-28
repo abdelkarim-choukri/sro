@@ -1,7 +1,8 @@
-from sro.utils.random import set_all_seeds
 from sro.config import load_config
 from sro.prover import SROProver
 from sro.types import Claim, SentenceCandidate
+from sro.utils.random import set_all_seeds
+
 
 def build_tiny():
     cfg = load_config()

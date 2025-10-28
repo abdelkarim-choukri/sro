@@ -3,7 +3,8 @@ UB bounds & monotonicity tests:
   - UB must be in [0,1].
   - Increasing κ (kappa) must not decrease UB (monotone non-decreasing).
 """
-from sro.prover.s4_ub import upper_bound, UBWeights
+from sro.prover.s4_ub import UBWeights, upper_bound
+
 
 def test_ub_in_unit_interval_and_monotone_in_kappa():
     feats = {

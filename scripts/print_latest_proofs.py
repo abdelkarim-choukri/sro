@@ -1,10 +1,12 @@
 # scripts/print_latest_proofs.py
 from __future__ import annotations
+
 import argparse
 import json
 from pathlib import Path
 
 from sro.prover.logio import latest_lines
+
 
 def main():
     ap = argparse.ArgumentParser()

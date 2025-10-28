@@ -1,7 +1,10 @@
 # sro/nli/onehop.py
 from typing import List, Tuple
+
 import torch
+
 from sro.utils.batching import batched
+
 
 class OneHopNLI:
     def __init__(self, tokenizer, model):
@@ -9,8 +12,8 @@ class OneHopNLI:
         self.model = model.eval()
 
     @torch.inference_mode()
-    def score(self, premises: List[str], hypothesis: str,
-              batch_size: int = 32, device: str = "cuda") -> Tuple[torch.Tensor, torch.Tensor]:
+    def score(self, premises: list[str], hypothesis: str,
+              batch_size: int = 32, device: str = "cuda") -> tuple[torch.Tensor, torch.Tensor]:
         # returns (p_entail, p_contra) as float32 on CPU
         pe_list, pc_list = [], []
         for chunk in batched(premises, batch_size):

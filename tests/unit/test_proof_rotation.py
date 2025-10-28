@@ -1,7 +1,9 @@
 # tests/unit/test_proof_rotation.py
 from __future__ import annotations
+
 import json
 from pathlib import Path
+
 
 def test_append_and_force_rotate(tmp_path, monkeypatch):
     base: Path = tmp_path / "proofs.jsonl"

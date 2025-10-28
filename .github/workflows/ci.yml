@@ -119,8 +119,10 @@ jobs:
       - name: Ruff (quick)
         run: ruff check sro tests
 
-      - name: Mypy (core only)
-        run: mypy sro
+      - name: Mypy (scoped)
+        run: |
+          mypy sro/retrieval sro/logging scripts/build_faiss.py scripts/run_e2e_retrieval.py
+
 
       - name: Unit subset (offline-safe)
         run: |

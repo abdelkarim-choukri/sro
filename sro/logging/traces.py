@@ -17,13 +17,13 @@ _REQUIRED_KEYS = {
     "timestamp_iso",
 }
 
-def emit_trace(row: Dict[str, Any], path: str) -> None:
+def emit_trace(row: dict[str, Any], path: str) -> None:
     """
     Append a structured trace row to a JSONL file, guaranteeing required keys.
 
     This is intentionally minimal and safe under concurrent appends.
     """
-    now = dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc).isoformat()
+    now = dt.datetime.now(dt.timezone.utc).isoformat()
     out = dict(row)
     out.setdefault("timestamp_iso", now)
 

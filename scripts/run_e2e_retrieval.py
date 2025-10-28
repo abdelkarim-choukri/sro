@@ -2,10 +2,17 @@
 
 
 from __future__ import annotations
-# === BOOTSTRAP: env + console + warning filters (must be before any HF/ST imports) ===
-import os, sys, warnings
-from pathlib import Path
+
 import json
+import logging
+
+# === BOOTSTRAP: env + console + warning filters (must be before any HF/ST imports) ===
+import os
+import sys
+import warnings
+from pathlib import Path
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
 # Silence HF hub's deprecated message about local_dir_use_symlinks (it’s harmless noise)
 warnings.filterwarnings(
@@ -28,8 +35,10 @@ os.environ.setdefault("TQDM_DISABLE", "1")  # belt-and-suspenders for progress b
 
 # UTF-8-safe console on Windows (avoid UnicodeEncodeError: 'gbk')
 try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 except Exception:
     pass
 
@@ -42,11 +51,13 @@ except Exception:
 # === END BOOTSTRAP ===
 
 
-from sro.config import load_config, apply_profile, apply_env_overrides, validate_config
-from sro.utils.random import set_all_seeds
-from sro.retrieval.hybrid import get_initial_candidates
-from sro.rerank.cross_encoder import CrossEncoderReranker
 import argparse
+
+from sro.config import apply_env_overrides, apply_profile, load_config, validate_config
+from sro.rerank.cross_encoder import CrossEncoderReranker
+from sro.retrieval.hybrid import get_initial_candidates
+from sro.utils.random import set_all_seeds
+
 # UTF-8-safe console
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")

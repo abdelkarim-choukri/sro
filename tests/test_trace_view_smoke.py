@@ -1,4 +1,10 @@
-import os, json, tempfile, subprocess, sys, pathlib
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import tempfile
+
 
 def test_trace_view_generates_html():
     with tempfile.TemporaryDirectory() as td:

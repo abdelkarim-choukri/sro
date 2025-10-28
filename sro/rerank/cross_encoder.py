@@ -1,8 +1,13 @@
 from __future__ import annotations
-from typing import List, Optional, Sequence
+
+from collections.abc import Sequence
+from typing import List, Optional
+
 import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
 from sro.utils.hf import ensure_repo_local
+
 
 class CrossEncoderReranker:
     """
@@ -16,7 +21,7 @@ class CrossEncoderReranker:
         self,
         model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
         cache_dir: str = "models_cache",
-        device: Optional[str] = None,
+        device: str | None = None,
     ) -> None:
         self.model_name = model_name  # str: HF repo id or local dir
         self.cache_dir = cache_dir    # str: local cache root
@@ -37,7 +42,7 @@ class CrossEncoderReranker:
         passages: Sequence[str],
         batch_size: int = 32,
         max_length: int = 512,
-    ) -> List[float]:
+    ) -> list[float]:
         """
         Inputs:
           queries: list[str] (len N) or a single str (broadcasted)
@@ -51,7 +56,7 @@ class CrossEncoderReranker:
         if len(queries) != len(passages):
             raise ValueError(f"queries (len={len(queries)}) and passages (len={len(passages)}) must have same length")
 
-        scores: List[float] = []
+        scores: list[float] = []
         for start in range(0, len(passages), batch_size):
             end = min(len(passages), start + batch_size)
             q = list(queries[start:end])

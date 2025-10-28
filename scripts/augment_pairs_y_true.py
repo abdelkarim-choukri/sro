@@ -64,14 +64,14 @@ def set_all_seeds(seed: int) -> None:
 
 
 # ---------- sent_id -> text ----------
-def _load_corpus_map(path: str) -> Dict[str, str]:
+def _load_corpus_map(path: str) -> dict[str, str]:
     if not os.path.isfile(path):
         raise FileNotFoundError(
             f"Default corpus not found at {path}. Create it or point your pipeline to a corpus.\n"
             "Expected one sentence per line; sent_ids are s0, s1, ..."
         )
-    m: Dict[str, str] = {}
-    with open(path, "r", encoding="utf-8") as f:
+    m: dict[str, str] = {}
+    with open(path, encoding="utf-8") as f:
         for i, line in enumerate(f):
             s = line.strip()
             if not s:
@@ -94,7 +94,7 @@ def _norm_sent_id(raw: str) -> str:
     return raw  # last resort: return raw
 
 
-def _maybe_lookup(sent_id: str, m: Dict[str, str]) -> Optional[str]:
+def _maybe_lookup(sent_id: str, m: dict[str, str]) -> str | None:
     sid = _norm_sent_id(str(sent_id))
     txt = m.get(sid)
     if txt is None:
@@ -134,8 +134,8 @@ def _entail_idx_from_backend(backend) -> int:
     raise KeyError("Cannot infer entailment index from backend. Add label_to_index['entailment'].")
 
 
-def _score_pairs(backend: NLIBackend, premises: List[str], hypotheses: List[str], bs: int) -> np.ndarray:
-    outs: List[np.ndarray] = []
+def _score_pairs(backend: NLIBackend, premises: list[str], hypotheses: list[str], bs: int) -> np.ndarray:
+    outs: list[np.ndarray] = []
     entail_idx: int = -1  # lazy-resolve once per batch if needed
 
     for i in range(0, len(premises), bs):

@@ -1,6 +1,7 @@
-from sro.types import SentenceCandidate
-from sro.prover.s5_bounded_search import bounded_search
 from sro.prover.s4_ub import UBWeights
+from sro.prover.s5_bounded_search import bounded_search
+from sro.types import SentenceCandidate
+
 
 def test_early_stop_without_evals():
     cands = [

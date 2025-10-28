@@ -1,10 +1,13 @@
 # sro/claims/splitter.py
 from __future__ import annotations
-from typing import List, Set
-import re
+
+from math import e
 import os
+import re
+from typing import List, Set
 
 from sro.types import Claim
+
 __all__ = ["split", "split_into_claims", "draft_and_claims"]
 
 _DEFAULT_MAX_TOKENS = int(os.getenv("SRO_SPLIT_MAX_TOKENS", "25"))  # max tokens per claim
@@ -33,13 +36,13 @@ _VERB_LIKE = {
     "say","says","said","stated","state","states","claim","claims","claimed"
 }
 
-def _tokens(text: str) -> List[str]:
+def _tokens(text: str) -> list[str]:
     return [t.lower() for t in _WORD.findall(text or "")]
 
 def _norm(text: str) -> str:
     return " ".join(_tokens(text))
 
-def _has_verb(tokens: List[str]) -> bool:
+def _has_verb(tokens: list[str]) -> bool:
     for t in tokens:
         if t in _VERB_LIKE:
             return True
@@ -47,7 +50,7 @@ def _has_verb(tokens: List[str]) -> bool:
             return True
     return False
 
-def _has_noun_like(tokens: List[str]) -> bool:
+def _has_noun_like(tokens: list[str]) -> bool:
     for t in tokens:
         if t in _STOPWORDS:
             continue
@@ -71,12 +74,12 @@ def _cap_tokens(text: str, max_tokens: int) -> str:
         return text.strip()
     return " ".join(toks[:max_tokens]).strip()
 
-def _simple_sent_split(draft: str) -> List[str]:
+def _simple_sent_split(draft: str) -> list[str]:
     draft = (draft or "").replace(";", ". ")
     parts = _SENT_SPLIT.split(draft.strip())
     return [p.strip() for p in parts if p and p.strip()]
 
-def split(draft_text: str, *, max_tokens: int = _DEFAULT_MAX_TOKENS) -> List[Claim]:
+def split(draft_text: str, *, max_tokens: int = _DEFAULT_MAX_TOKENS) -> list[Claim]:
     """
     Split a draft into crisp, deduped, bounded-length claims:
       - naive sentence split
@@ -88,8 +91,8 @@ def split(draft_text: str, *, max_tokens: int = _DEFAULT_MAX_TOKENS) -> List[Cla
         return []
 
     sents = _simple_sent_split(draft_text)
-    seen_norm: Set[str] = set()
-    out: List[Claim] = []
+    seen_norm: set[str] = set()
+    out: list[Claim] = []
     k = 1
 
     for s in sents:
@@ -107,7 +110,7 @@ def split(draft_text: str, *, max_tokens: int = _DEFAULT_MAX_TOKENS) -> List[Cla
 
     return out
 
-def split_into_claims(draft_text: str, *, max_tokens: int = _DEFAULT_MAX_TOKENS) -> List[Claim]:
+def split_into_claims(draft_text: str, *, max_tokens: int = _DEFAULT_MAX_TOKENS) -> list[Claim]:
     return split(draft_text, max_tokens=max_tokens)
 
 
@@ -116,7 +119,7 @@ try:
     from sro.compose.answer import draft_and_claims as _draft_and_claims
     def draft_and_claims(*args, **kwargs):
         return _draft_and_claims(*args, **kwargs)
-except Exception as e:
+except Exception:
     # If compose.answer cannot be imported for some reason, surface a clear error
     def draft_and_claims(*args, **kwargs):
         raise ImportError(

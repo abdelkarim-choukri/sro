@@ -18,10 +18,9 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional
-
+from typing import Any, Dict, Optional
 
 ISO = "%Y-%m-%dT%H:%M:%S.%fZ"
 
@@ -35,7 +34,7 @@ class TraceEvent:
     ts: str
     type: str
     stage: str
-    data: Dict[str, Any]
+    data: dict[str, Any]
     run_id: str
 
     def to_json(self) -> str:
@@ -46,14 +45,14 @@ class TraceRecorder:
     """
     Minimal trace writer. Open-per-write (atomic-ish on Windows too).
     """
-    def __init__(self, out_path: str, *, run_id: Optional[str] = None, meta: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(self, out_path: str, *, run_id: str | None = None, meta: dict[str, Any] | None = None) -> None:
         self.out_path = out_path
         self.run_id = run_id or str(uuid.uuid4())
         os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
         # write session header
         self.log("session_start", stage="S0", data={"meta": meta or {}})
 
-    def log(self, ev_type: str, *, stage: str, data: Dict[str, Any]) -> None:
+    def log(self, ev_type: str, *, stage: str, data: dict[str, Any]) -> None:
         ev = TraceEvent(ts=_now_iso(), type=ev_type, stage=stage, data=data, run_id=self.run_id)
         line = ev.to_json()
         with open(self.out_path, "a", encoding="utf-8") as f:

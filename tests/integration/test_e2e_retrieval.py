@@ -1,13 +1,14 @@
 # tests/integration/test_e2e_retrieval.py
 from __future__ import annotations
-from pathlib import Path
+
 import json
+from pathlib import Path
 
 from sro.config import load_config
-from sro.types import Claim
 from sro.prover import SROProver
 from sro.rerank.cross_encoder import CrossEncoderReranker
 from sro.retrieval.hybrid import get_initial_candidates, make_fetch_more
+from sro.types import Claim
 
 CORPUS = Path("data/corpus/corpus.jsonl")
 
@@ -38,7 +39,6 @@ def _runner(claim_text: str):
     _ensure_demo_corpus()
     cfg = load_config()
     # keep tests light: no CE in CI
-    reranker = None
 
     init = get_initial_candidates(
         str(cfg.retrieval.corpus_jsonl),

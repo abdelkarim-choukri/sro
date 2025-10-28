@@ -1,16 +1,22 @@
 # sro/compose/answer.py
 from __future__ import annotations
-from typing import List, Dict, Tuple, Set
+
 import re
+from typing import Dict, List, Set, Tuple
+
 import numpy as np
+
 from sro.utils.st import get_st
+import re
+from typing import Optional
+from sro.types import Claim, SentenceCandidate
 
 # ----------------------------
 # Lightweight token helpers
 # ----------------------------
 _WORD_RE = re.compile(r"[A-Za-z0-9]+")
 
-def _tokens(s: str) -> Set[str]:
+def _tokens(s: str) -> set[str]:
     return set(t.lower() for t in _WORD_RE.findall(s or ""))
 
 # ----------------------------
@@ -27,7 +33,7 @@ def _st():
     # Offline/cache-friendly getter; model is already warmed per project setup.
     return get_st("sentence-transformers/all-MiniLM-L6-v2")
 
-def _embed(texts: List[str]) -> np.ndarray:
+def _embed(texts: list[str]) -> np.ndarray:
     return _st().encode(
         texts,
         convert_to_numpy=True,
@@ -42,10 +48,10 @@ def _cos(a: np.ndarray, b: np.ndarray) -> float:
 # ----------------------------
 # Citation utilities
 # ----------------------------
-def _uniq_sources(citations: List[Dict[str, str]]) -> List[str]:
+def _uniq_sources(citations: list[dict[str, str]]) -> list[str]:
     """Return unique source_ids in first-appearance order."""
-    seen: Set[str] = set()
-    out: List[str] = []
+    seen: set[str] = set()
+    out: list[str] = []
     for c in citations or []:
         sid = c.get("source_id") or ""
         if sid and sid not in seen:
@@ -57,13 +63,13 @@ def _uniq_sources(citations: List[Dict[str, str]]) -> List[str]:
 # Composer
 # ----------------------------
 def compose_answer_with_citations(
-    accepted: List[Dict],
+    accepted: list[dict],
     *,
     N: int = 2,               # max sentences in final answer
     theta_dup: float = 0.90,  # θ — duplicate threshold on cosine
     psi_concat: float = 0.40, # ψᶜ — min cosine to join claims in one sentence
     enforce_source_diversity: bool = True,  # prefer different sources
-) -> Tuple[str, List[Tuple[str, str]]]:
+) -> tuple[str, list[tuple[str, str]]]:
     """
     Inputs:
       accepted: list of dicts with keys:
@@ -87,7 +93,7 @@ def compose_answer_with_citations(
     embs = _embed(texts)
 
     # 2) deduplicate by cosine (keep first in each near-duplicate cluster)
-    nondup_idx: List[int] = []
+    nondup_idx: list[int] = []
     for i in range(len(accepted)):
         if not nondup_idx:
             nondup_idx.append(i)
@@ -97,7 +103,7 @@ def compose_answer_with_citations(
         nondup_idx.append(i)
 
     # Helper: primary source_id for a claim (first unique in its citations)
-    def _primary_src(a: Dict) -> str:
+    def _primary_src(a: dict) -> str:
         cites = a.get("citations") or []
         for c in cites:
             sid = c.get("source_id") or ""
@@ -106,7 +112,7 @@ def compose_answer_with_citations(
         return ""
 
     # 3) pick up to N with optional source diversity
-    picked_idx: List[int] = []
+    picked_idx: list[int] = []
     used_src: set[str] = set()
     if enforce_source_diversity:
         # first pass: only take claims introducing a new source
@@ -133,14 +139,14 @@ def compose_answer_with_citations(
     kept = [accepted[i] for i in picked_idx]
 
     # 4) Build global markers over unique source_ids from kept claims (ASCII markers)
-    all_cites: List[Dict[str, str]] = []
+    all_cites: list[dict[str, str]] = []
     for k in kept:
         all_cites.extend(k.get("citations") or [])
     uniq_srcs = _uniq_sources(all_cites)
-    src_to_marker: Dict[str, str] = {src: _idx_to_mark(i) for i, src in enumerate(uniq_srcs)}
+    src_to_marker: dict[str, str] = {src: _idx_to_mark(i) for i, src in enumerate(uniq_srcs)}
 
     # Attach markers to text and compact to ≤N sentences
-    parts: List[str] = []
+    parts: list[str] = []
     prev_vec: np.ndarray | None = None
     for k in kept:
         t = (k.get("text") or "").strip()
@@ -163,26 +169,28 @@ def compose_answer_with_citations(
     parts = parts[:N]  # enforce final cap
     final_answer = " ".join(parts).strip()
 
-    refs: List[Tuple[str, str]] = [(src_to_marker[s], s) for s in uniq_srcs]
+    refs: list[tuple[str, str]] = [(src_to_marker[s], s) for s in uniq_srcs]
     return final_answer, refs
 
 
  
 
-from typing import List, Dict, Tuple, Set, Optional
 import re
-import numpy as np
-from sro.types import SentenceCandidate, Claim
-from sro.utils.st import get_st
+from typing import Optional
+
+from sro.types import Claim, SentenceCandidate
 
 _WORD_RE = re.compile(r"[A-Za-z0-9]+")
-def _tokens(s: str) -> Set[str]:
+def _tokens(s: str) -> set[str]:
     return set(t.lower() for t in _WORD_RE.findall(s or ""))
 
-def _jaccard(a: Set[str], b: Set[str]) -> float:
-    if not a and not b: return 0.0
-    inter = len(a & b); union = len(a | b)
+def _jaccard(a: set[str], b: set[str]) -> float:
+    if not a and not b:
+        return 0.0
+    inter = len(a & b)
+    union = len(a | b)
     return (inter / union) if union else 0.0
+
 
 def _source_prefix(source_id: str) -> str:
     """Extracts the prefix from a source_id string, which is the part before the first colon.
@@ -192,7 +200,7 @@ def _source_prefix(source_id: str) -> str:
 class _ST:
     _m = None
     @classmethod
-    def enc(cls, texts: List[str]) -> np.ndarray:
+    def enc(cls, texts: list[str]) -> np.ndarray:
         if cls._m is None:
             cls._m = get_st("sentence-transformers/all-MiniLM-L6-v2")
         return cls._m.encode(texts, convert_to_numpy=True, normalize_embeddings=True, show_progress_bar=False, batch_size=64)
@@ -201,7 +209,7 @@ def _cos(a: np.ndarray, b: np.ndarray) -> float:
     """takes two vectors (NumPy arrays a and b) and computes their similarity score"""
     return float(np.clip((a*b).sum(), -1.0, 1.0))
 
-def _is_hedged(text: str, pats: List[re.Pattern]) -> bool:
+def _is_hedged(text: str, pats: list[re.Pattern]) -> bool:
     """Checks if the given text contains any hedging terms based on provided regex patterns.
      for example, if the text contains words like "might" or "reportedly", it returns True."""
     low = (text or "").lower()
@@ -209,14 +217,14 @@ def _is_hedged(text: str, pats: List[re.Pattern]) -> bool:
 
 def pick_top_sentences(
     question: str,
-    cands: List[SentenceCandidate],
+    cands: list[SentenceCandidate],
     *,
     K: int,
     min_question_cosine: float,
-    hedge_terms: List[str],
-    reliability_weights: Dict[str, float],
+    hedge_terms: list[str],
+    reliability_weights: dict[str, float],
     max_sim: float = 0.85,
-) -> List[SentenceCandidate]:
+) -> list[SentenceCandidate]:
     """Pick top-K sentences from cands relevant to question,
     filtering out hedged sentences and near-duplicates."""
     if not cands:
@@ -226,11 +234,13 @@ def pick_top_sentences(
     qv = _ST.enc([question])[0]
     sv = _ST.enc([c.text for c in cands])
 
-    scored: List[Tuple[int, float]] = []
+    scored: list[tuple[int, float]] = []
     for i, s in enumerate(cands):
-        if _is_hedged(s.text, pats): continue
+        if _is_hedged(s.text, pats):
+            continue
         cos = _cos(qv, sv[i])
-        if cos < min_question_cosine: continue
+        if cos < min_question_cosine:
+            continue
         w_src = reliability_weights.get(_source_prefix(s.source_id), 1.0)
         rel = (s.ce_score or 0.0) * float(w_src) * max(cos, 0.0)
         scored.append((i, rel))
@@ -239,8 +249,8 @@ def pick_top_sentences(
     scored.sort(key=lambda t: t[1], reverse=True)
     order = [i for (i, _) in scored]
 
-    picked: List[SentenceCandidate] = []
-    toks_list: List[Set[str]] = []
+    picked: list[SentenceCandidate] = []
+    toks_list: list[set[str]] = []
     for i in order:
         tok = _tokens(cands[i].text)
         if any(_jaccard(tok, t) > max_sim for t in toks_list):
@@ -253,14 +263,14 @@ def pick_top_sentences(
 
 def draft_and_claims(
     question: str,
-    initial_cands: List[SentenceCandidate],
+    initial_cands: list[SentenceCandidate],
     *,
-    K: Optional[int] = None,
-    min_question_cosine: Optional[float] = None,
-    hedge_terms: Optional[List[str]] = None,
-    reliability_weights: Optional[Dict[str, float]] = None,
-    max_claims: Optional[int] = None,
-) -> Tuple[str, List[Claim]]:
+    K: int | None = None,
+    min_question_cosine: float | None = None,
+    hedge_terms: list[str] | None = None,
+    reliability_weights: dict[str, float] | None = None,
+    max_claims: int | None = None,
+) -> tuple[str, list[Claim]]:
     if K is None:
         K = max_claims if max_claims is not None else 3
     if min_question_cosine is None:

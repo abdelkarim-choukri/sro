@@ -4,6 +4,7 @@ Minimality test:
 """
 from sro.prover.s6_minimality import is_minimal
 
+
 def test_minimality_rejects_when_leaf_crosses_tau1():
     tau1 = 0.75
     # Leaf i crosses tau1

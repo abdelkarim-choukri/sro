@@ -1,6 +1,8 @@
 # tests/test_backend_labels.py
 import pytest
+
 from sro.nli.backend import _normalize_nli_label_map
+
 
 def test_normalize_nli_label_map_three_class():
     id2label = {0: "entailment", 1: "neutral", 2: "contradiction"}

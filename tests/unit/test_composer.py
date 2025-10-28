@@ -1,5 +1,6 @@
 from sro.compose.answer import compose_answer_with_citations
 
+
 def test_compose_inline_cites_and_refs():
     accepted = [
         {"text":"The iPhone 15 Pro features a titanium frame.","score":0.99,

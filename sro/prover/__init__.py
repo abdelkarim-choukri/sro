@@ -21,13 +21,14 @@ Notes:
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import List, Optional, Set
 
-from sro.types import Claim, SentenceCandidate, ProofObject
+from sro.types import Claim, ProofObject, SentenceCandidate
 
 # Minimal mutually-exclusive lexicon to detect conflicts in our tests
-_MATERIAL_TOKENS: Set[str] = {
+_MATERIAL_TOKENS: set[str] = {
     "titanium",
     "aluminum",
     "aluminium",
@@ -43,12 +44,12 @@ _MATERIAL_TOKENS: Set[str] = {
 _ACCEPT_THRESH = 0.40
 
 
-def _norm_tokens(s: str) -> List[str]:
+def _norm_tokens(s: str) -> list[str]:
     """Lowercase, keep alnum, split on non-alnum."""
     return [t for t in "".join(ch.lower() if ch.isalnum() else " " for ch in s).split() if t]
 
 
-def _overlap_frac(a: List[str], b: List[str]) -> float:
+def _overlap_frac(a: list[str], b: list[str]) -> float:
     """Symmetric overlap on min(|A|,|B|) denominator; ∈[0,1]."""
     if not a or not b:
         return 0.0
@@ -58,7 +59,7 @@ def _overlap_frac(a: List[str], b: List[str]) -> float:
     return inter / float(denom)
 
 
-def _material_set(tokens: List[str]) -> Set[str]:
+def _material_set(tokens: list[str]) -> set[str]:
     """
     Extract material tokens; normalize 'stainless steel' → 'stainlesssteel'.
     """
@@ -74,8 +75,8 @@ def _material_set(tokens: List[str]) -> Set[str]:
 @dataclass
 class _ProofResult:
     status: str                           # "ACCEPT" | "REJECT" | "ABSTAIN"
-    proof: Optional[ProofObject] = None   # present when ACCEPT
-    reason: Optional[str] = None          # reason when not ACCEPT
+    proof: ProofObject | None = None   # present when ACCEPT
+    reason: str | None = None          # reason when not ACCEPT
 
 
 class SROProver:
@@ -91,7 +92,7 @@ class SROProver:
     def prove(
         self,
         claim: Claim,
-        candidates: List[SentenceCandidate],
+        candidates: list[SentenceCandidate],
         *,
         fetch_more=None,  # kept for signature compatibility; unused here
     ) -> _ProofResult:

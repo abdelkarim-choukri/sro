@@ -1,5 +1,6 @@
 # sro/utils/st.py
 from __future__ import annotations
+
 import os
 from pathlib import Path
 from typing import Dict
@@ -15,7 +16,7 @@ os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 # in-process cache
-_REG: Dict[str, object] = {}
+_REG: dict[str, object] = {}
 
 def get_st(model_id: str):
     """

@@ -1,8 +1,10 @@
 # tests/unit/test_citations_shape.py
 from __future__ import annotations
-from sro.types import SentenceCandidate, Claim
-from sro.prover import SROProver
+
 from sro.config import load_config
+from sro.prover import SROProver
+from sro.types import Claim, SentenceCandidate
+
 
 def test_citation_dict_shape():
     cfg = load_config()

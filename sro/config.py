@@ -1,9 +1,12 @@
 # sro/config.py
 from __future__ import annotations
+
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+
 import yaml
-from pydantic import BaseModel, Field, PositiveInt, field_validator, model_validator, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt, field_validator, model_validator
+
 
 class SROProverCfg(BaseModel):
     M: PositiveInt = Field(8, description="frontier size (first-hop keep)")
@@ -28,7 +31,7 @@ class SROProverCfg(BaseModel):
         return float(v)
 
     @model_validator(mode="after")
-    def _cross_invariants(self) -> "SROProverCfg":
+    def _cross_invariants(self) -> SROProverCfg:
         if self.tau2 < self.tau1:
             raise ValueError(f"tau2 ({self.tau2}) must be >= tau1 ({self.tau1})")
         if self.M > self.max_sentences_per_claim:
@@ -88,7 +91,7 @@ class ClaimsCfg(BaseModel):
         r"\baccording to (sources|rumors)\b",
     ]
     # w_src: per-source head weight (prefix before ':'); defaults to 1.0 if not present
-    reliability_weights: Dict[str, float] = {
+    reliability_weights: dict[str, float] = {
         "news": 1.00,
         "press": 0.95,
         "blog": 0.60,
@@ -117,7 +120,7 @@ _FLAT_KEYS = {
     "M","L","B","tau1","tau2","delta","kappa","epsilon","max_sentences_per_claim"
 }
 
-def _normalize_data(data: Dict[str, Any]) -> Dict[str, Any]:
+def _normalize_data(data: dict[str, Any]) -> dict[str, Any]:
     if not data:
         return {}
     data = dict(data)
@@ -128,8 +131,8 @@ def _normalize_data(data: Dict[str, Any]) -> Dict[str, Any]:
     # allow users to omit retrieval; defaults will fill
     return data
 
-def load_config(path: Optional[str] = "configs/default.yaml") -> Config:
-    data: Dict[str, Any] = {}
+def load_config(path: str | None = "configs/default.yaml") -> Config:
+    data: dict[str, Any] = {}
     if path:
         p = Path(path)
         if p.exists():
@@ -172,7 +175,7 @@ def _cast_env_value(val: str, current):
     return val
 
 
-def apply_env_overrides(cfg: "Config") -> None:
+def apply_env_overrides(cfg: Config) -> None:
     """
     Override knobs from environment variables.
     Supported:
@@ -214,7 +217,7 @@ def apply_env_overrides(cfg: "Config") -> None:
             continue
 
 
-def apply_profile(cfg: "Config", name: str) -> None:
+def apply_profile(cfg: Config, name: str) -> None:
     """
     --profile low|med|high -> map to (M, L, B) presets:
       low  = (4, 12, 32)
@@ -238,7 +241,7 @@ def apply_profile(cfg: "Config", name: str) -> None:
     sp.B = int(B)
 
 
-def validate_config(cfg: "Config") -> None:
+def validate_config(cfg: Config) -> None:
     """
     Sanity checks demanded by v1:
       - tau2 >= tau1

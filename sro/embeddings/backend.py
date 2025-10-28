@@ -50,7 +50,7 @@ def _has_local_model_files(path: str) -> bool:
     return has_weights
 
 
-def _raise_offline_help(model_name: str, model_dir: Optional[str], cache_dir: str) -> None:
+def _raise_offline_help(model_name: str, model_dir: str | None, cache_dir: str) -> None:
     msg = [
         "Embedding model not found locally (offline mode). Fix in one of these ways:",
         "1) Point to a local model directory containing modules.json/config.json and model weights:",

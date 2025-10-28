@@ -1,20 +1,21 @@
 from __future__ import annotations
-from typing import List, Tuple, Dict, Set
+
 import math
 import re
+from typing import Dict, List, Set, Tuple
 
 from sro.types import SentenceCandidate
 
 # _WORD_RE: regex to extract alphanumeric tokens.
 _WORD_RE = re.compile(r"[A-Za-z0-9]+")
 
-def _tokens(s: str) -> Set[str]:
+def _tokens(s: str) -> set[str]:
     """Return a set of lowercase tokens (simple alnum tokenizer)."""
     if not isinstance(s, str):
         return set()
     return set(t.lower() for t in _WORD_RE.findall(s))
 
-def _jaccard(a: Set[str], b: Set[str]) -> float:
+def _jaccard(a: set[str], b: set[str]) -> float:
     """Jaccard similarity between two token sets in [0,1]."""
     if not a and not b:
         return 0.0
@@ -29,12 +30,12 @@ def _clean01(x: float) -> float:
     return 0.0 if x < 0.0 else (1.0 if x > 1.0 else x)
 
 def select_frontier_and_pool(
-    candidates: List[SentenceCandidate],
-    p1: List[float],
+    candidates: list[SentenceCandidate],
+    p1: list[float],
     M: int,
     L: int,
     lambda_diversity: float = 0.7,
-) -> Tuple[List[int], List[int], Dict[str, Set[str]]]:
+) -> tuple[list[int], list[int], dict[str, set[str]]]:
     """
     Select a frontier (size ≤ M) via true MMR, then a second-hop pool (size ≤ L)
     ranked by (relevance × novelty).
@@ -67,7 +68,7 @@ def select_frontier_and_pool(
     p1c = [_clean01(v) for v in p1]
 
     # Precompute tokens once
-    token_cache: Dict[str, Set[str]] = {c.sent_id: _tokens(c.text) for c in candidates}
+    token_cache: dict[str, set[str]] = {c.sent_id: _tokens(c.text) for c in candidates}
 
     # ----- sorted order by relevance (p1), then ce_score, then sent_id
     # This ensures deterministic tie-breaking.
@@ -88,7 +89,7 @@ def select_frontier_and_pool(
     # Keep running max similarity to the already-selected frontier:
     # max_sim[i] = max_j_in_frontier Jaccard(i, j)
     max_sim = [0.0] * n
-    frontier: List[int] = []
+    frontier: list[int] = []
     selected = set()
 
     # Seed with the best relevant item

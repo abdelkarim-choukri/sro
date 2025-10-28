@@ -28,7 +28,6 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 
-
 FEATURES = ("best_so_far", "top_ub", "budget_left_norm", "frontier_entropy", "ub_bandwidth")
 
 

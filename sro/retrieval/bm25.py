@@ -1,8 +1,11 @@
 # sro/retrieval/bm25.py
 from __future__ import annotations
-from typing import List, Dict, Iterable
+
 import math
 from collections import Counter, defaultdict
+from collections.abc import Iterable
+from typing import Dict, List
+
 
 class BM25OkapiLite:
     """
@@ -13,12 +16,12 @@ class BM25OkapiLite:
       k1: positive float (default 1.5) – BM25 term saturation.
       b:  float in [0,1] (default 0.75) – length normalization.
     """
-    def __init__(self, corpus_tokens: List[List[str]], k1: float = 1.5, b: float = 0.75):
+    def __init__(self, corpus_tokens: list[list[str]], k1: float = 1.5, b: float = 0.75):
         self.k1 = float(k1)
         self.b = float(b)
         self.corpus_tokens = corpus_tokens
         self.N = len(corpus_tokens)
-        self.doc_freq: Dict[str, int] = defaultdict(int)
+        self.doc_freq: dict[str, int] = defaultdict(int)
         self.doc_len = [0] * self.N
         self.avgdl = 0.0
 
@@ -32,7 +35,7 @@ class BM25OkapiLite:
         self.avgdl = sum(self.doc_len) / max(1, self.N)
 
         # Precompute IDF
-        self.idf: Dict[str, float] = {}
+        self.idf: dict[str, float] = {}
         for term, df in self.doc_freq.items():
             # BM25 idf with +0.5 smoothing
             self.idf[term] = math.log(1 + (self.N - df + 0.5) / (df + 0.5))
@@ -57,6 +60,6 @@ class BM25OkapiLite:
             score += sc * qcnt
         return score
 
-    def get_scores(self, query_tokens: Iterable[str]) -> List[float]:
+    def get_scores(self, query_tokens: Iterable[str]) -> list[float]:
         qtf = Counter(list(query_tokens))
         return [self._score_doc(qtf, i) for i in range(self.N)]

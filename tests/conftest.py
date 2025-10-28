@@ -1,6 +1,7 @@
 # tests/conftest.py
-from pathlib import Path
 import os
+from pathlib import Path
+
 
 def pytest_sessionstart(session):
     cache_root = Path("models_cache").resolve()

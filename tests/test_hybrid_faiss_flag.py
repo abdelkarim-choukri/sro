@@ -3,15 +3,14 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import pytest
 
-from sro.retrieval.faiss_index import build_faiss_index, search_faiss
-
 # Import hybrid to validate SPLADE flag behavior.
 from sro.retrieval import hybrid as hybrid_mod  # type: ignore
+from sro.retrieval.faiss_index import build_faiss_index, search_faiss
 
 
 class FakeEmbed:

@@ -8,6 +8,7 @@ import sys
 
 from sro.retrieval.faiss_index import build_faiss_index
 
+
 # We try a few likely import locations for your embedding backend.
 # Adjust if your repo uses a different path/name.
 # The backend must expose: encode(texts: list[str], batch_size: int) -> np.ndarray
@@ -31,7 +32,7 @@ def _load_embedding_backend():
                 if be is not None:
                     return be
             # class with default ctor
-            return obj()  # type: ignore[call-arg]
+            return obj()  
         except Exception as e:
             tried.append(f"{modpath}.{factory}: {e!r}")
             continue
@@ -69,13 +70,13 @@ def main() -> None:
     backend = _load_embedding_backend()
     build_faiss_index(args.corpus, backend, args.out, bs=args.bs)
 
-    from sro.retrieval.faiss_index import _paths  # type: ignore
+    from sro.retrieval.faiss_index import _paths  
     P = _paths(args.out)
     import json, numpy as np  # noqa
 
     meta = {}
     if os.path.exists(P.meta):
-        with open(P.meta, "r", encoding="utf-8") as f:
+        with open(P.meta, encoding="utf-8") as f:
             meta = json.load(f)
 
     dim = meta.get("dim", "?")

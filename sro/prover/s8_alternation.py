@@ -39,16 +39,16 @@ __all__ = [
 
 @dataclass(frozen=True)
 class PolicyMeta:
-    features: Tuple[str, ...]
-    weights: Tuple[float, ...]
+    features: tuple[str, ...]
+    weights: tuple[float, ...]
     bias: float
     threshold: float = 0.5
     tau1: float = 0.75
     delta: float = 0.10
 
     @staticmethod
-    def load(path: str) -> "PolicyMeta":
-        with open(path, "r", encoding="utf-8") as f:
+    def load(path: str) -> PolicyMeta:
+        with open(path, encoding="utf-8") as f:
             d = json.load(f)
         feats = tuple(d["features"])
         w = tuple(float(x) for x in d["weights"])
@@ -95,8 +95,8 @@ class AlternationPolicy:
         ez = math.exp(z)
         return ez / (1.0 + ez)
 
-    def _vectorize(self, feats: Dict[str, float]) -> List[float]:
-        out: List[float] = []
+    def _vectorize(self, feats: dict[str, float]) -> list[float]:
+        out: list[float] = []
         for name in self.meta.features:
             v = float(feats.get(name, 0.0))
             if name in ("best_so_far", "top_ub", "budget_left_norm", "ub_bandwidth"):
@@ -104,12 +104,12 @@ class AlternationPolicy:
             out.append(v)
         return out
 
-    def score(self, feats: Dict[str, float]) -> float:
+    def score(self, feats: dict[str, float]) -> float:
         x = self._vectorize(feats)
         z = sum(w * xi for w, xi in zip(self.meta.weights, x)) + self.meta.bias
         return self._sigmoid(z)
 
-    def decide(self, feats: Dict[str, float], *, alternations_used: int) -> Dict[str, object]:
+    def decide(self, feats: dict[str, float], *, alternations_used: int) -> dict[str, object]:
         # Guardrail: one alternation max
         if int(alternations_used) >= 1:
             return {"alternate": False, "prob": 0.0, "reason": "ONE_ALT_CAP"}
@@ -137,7 +137,7 @@ def decide_alternation_from_pair_scores(
     alternations_used: int,
     budget_left_norm: float = 1.0,
     policy_path: str | None = None,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     """
     Minimal integration helper: build features from two 1-hop scores, get UB via s4_ub.upper_bound,
     and run the learned policy with guardrails.
@@ -145,6 +145,7 @@ def decide_alternation_from_pair_scores(
     Returns policy.decide(..) dict.
     """
     import math as _math
+
     from sro.prover.s4_ub import upper_bound  # uses learned UB if available
 
     best = float(max(p1_i, p1_j))

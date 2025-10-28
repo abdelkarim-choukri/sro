@@ -18,7 +18,7 @@ import logging
 import os
 import random
 import traceback
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -126,7 +126,7 @@ def _call_if_exists(obj: object, name: str, *args, **kwargs):
     return None
 
 
-def _run_legacy_inplace(args: argparse.Namespace, rec: Optional[TraceRecorder]) -> bool:
+def _run_legacy_inplace(args: argparse.Namespace, rec: TraceRecorder | None) -> bool:
     """
     Try to run legacy entrypoints defined in THIS module:
     run_question(question) -> run() -> run_cli(args) -> answer(question) -> main(args)
@@ -157,7 +157,7 @@ def _run_legacy_inplace(args: argparse.Namespace, rec: Optional[TraceRecorder]) 
     return False
 
 
-def _run_legacy_module(args: argparse.Namespace, rec: Optional[TraceRecorder]) -> bool:
+def _run_legacy_module(args: argparse.Namespace, rec: TraceRecorder | None) -> bool:
     """
     Try scripts.run_question_legacy module: prefers main(args) then run(args) then run().
     """
@@ -185,7 +185,7 @@ def _run_legacy_module(args: argparse.Namespace, rec: Optional[TraceRecorder]) -
     return False
 
 
-def _pretty_print_result(out: Optional[Dict[str, Any]]) -> None:
+def _pretty_print_result(out: dict[str, Any] | None) -> None:
     if not isinstance(out, dict):
         return
     final = out.get("final_answer") or out.get("answer") or ""
@@ -285,11 +285,11 @@ def _read_claim(args: argparse.Namespace) -> str:
     raise KeyError("dev_claims.csv present but has no claim/hypothesis column.")
 
 
-def _read_corpus_sentences(path: str = "data/corpus/sentences.txt") -> List[str]:
+def _read_corpus_sentences(path: str = "data/corpus/sentences.txt") -> list[str]:
     if not os.path.isfile(path):
         raise FileNotFoundError(f"Corpus file not found: {path}")
-    out: List[str] = []
-    with open(path, "r", encoding="utf-8") as f:
+    out: list[str] = []
+    with open(path, encoding="utf-8") as f:
         for line in f:
             s = line.strip()
             if s:
@@ -300,19 +300,19 @@ def _read_corpus_sentences(path: str = "data/corpus/sentences.txt") -> List[str]
 
 
 # ---------------- demos (wired with TraceRecorder) ----------------
-def _demo_alternation(nli, args: argparse.Namespace, rec: Optional[TraceRecorder] = None) -> None:
+def _demo_alternation(nli, args: argparse.Namespace, rec: TraceRecorder | None = None) -> None:
     """
     Demo: score a single claim vs corpus sentences, pick top-2 p1, call alternation policy.
     Purely for wiring; no side effects beyond logs.
     """
     log = logging.getLogger("demo.alt")
-    from sro.prover.s8_alternation import decide_alternation_from_pair_scores
     from sro.prover.s4_ub import upper_bound
+    from sro.prover.s8_alternation import decide_alternation_from_pair_scores
 
     claim = _read_claim(args)
     sents = _read_corpus_sentences()
     # score in batches
-    p1: List[float] = []
+    p1: list[float] = []
     bs = max(1, int(args.bs_nli1))
     for i in range(0, len(sents), bs):
         out = nli.score_pairs(sents[i:i + bs], [claim] * len(sents[i:i + bs]), batch_size=bs)
@@ -358,7 +358,7 @@ def _demo_alternation(nli, args: argparse.Namespace, rec: Optional[TraceRecorder
         })
 
 
-def _demo_global_safety(nli, args: argparse.Namespace, rec: Optional[TraceRecorder] = None) -> None:
+def _demo_global_safety(nli, args: argparse.Namespace, rec: TraceRecorder | None = None) -> None:
     """
     Demo: take two claims, compute best entailment and Cmax_local (conflict) vs toy corpus,
     enforce global safety across the two in sequence.
@@ -374,9 +374,9 @@ def _demo_global_safety(nli, args: argparse.Namespace, rec: Optional[TraceRecord
     sents = _read_corpus_sentences()
     bs = max(1, int(args.bs_nli1))
 
-    def _score_pairwise(claim: str) -> Tuple[float, float, str, str]:
-        ent_scores: List[float] = []
-        conf_scores: List[float] = []
+    def _score_pairwise(claim: str) -> tuple[float, float, str, str]:
+        ent_scores: list[float] = []
+        conf_scores: list[float] = []
         for i in range(0, len(sents), bs):
             batch = sents[i:i + bs]
             out = nli.score_pairs(batch, [claim] * len(batch), batch_size=bs)
@@ -451,7 +451,7 @@ def main() -> None:
         policy_path = os.environ.get("SRO_ALT_POLICY", "artifacts/alternation/policy.json")
         logging.getLogger("sro.prover.s8_alternation").info("ALT_POLICY probe path: %s", policy_path)
         if os.path.isfile(policy_path):
-            from sro.prover.s8_alternation import PolicyMeta, AlternationPolicy
+            from sro.prover.s8_alternation import AlternationPolicy, PolicyMeta
             _meta = PolicyMeta.load(policy_path)
             _ = AlternationPolicy(_meta)
             logging.getLogger("sro.prover.s8_alternation").info(
@@ -514,8 +514,9 @@ def _maybe_render_html(args: argparse.Namespace) -> None:
             return
         out_html = os.path.join(os.path.dirname(os.path.abspath(args.trace_out)), "report.html")
         # Call scripts.trace_view.main programmatically
-        from scripts.trace_view import main as _render
         import sys
+
+        from scripts.trace_view import main as _render
         old = sys.argv[:]
         sys.argv = ["trace_view.py", "--input", args.trace_out, "--out", out_html]
         _render()

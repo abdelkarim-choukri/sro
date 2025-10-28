@@ -1,6 +1,7 @@
 # tests/test_cross_claim_safety.py
 from sro.safety.cross_claim import CrossClaimSafety
 
+
 def test_accept_updates_global():
     s = CrossClaimSafety(delta=0.10)
     ok, info = s.check_and_maybe_update(best=0.85, cmax_local=0.60)  # margin = 0.25

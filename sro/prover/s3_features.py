@@ -195,9 +195,11 @@
 
 # sro/prover/s3_features.py
 from __future__ import annotations
-from typing import List, Tuple, Dict, Iterable, Set
+
 import math
 import re
+from collections.abc import Iterable
+from typing import Dict, List, Set, Tuple
 
 from sro.types import SentenceCandidate
 
@@ -209,19 +211,19 @@ _NEG_WORDS = {
 # naive antonym flags — this is intentionally simple; it’s a gate, not a classifier
 _NEG_MARKERS = _NEG_WORDS
 
-def _tokens(s: str) -> List[str]:
+def _tokens(s: str) -> list[str]:
     return [t.lower() for t in _WORD.findall(s or "")]
 
-def _token_set(s: str) -> Set[str]:
+def _token_set(s: str) -> set[str]:
     return set(_tokens(s))
 
-def _jaccard(a: Set[str], b: Set[str]) -> float:
+def _jaccard(a: set[str], b: set[str]) -> float:
     if not a and not b:
         return 0.0
     u = len(a | b)
     return (len(a & b) / u) if u else 0.0
 
-def _time_agreement(a: Set[str], b: Set[str]) -> float:
+def _time_agreement(a: set[str], b: set[str]) -> float:
     # toy heuristic: shared year-like tokens (4 digits) or month names
     years_a = {t for t in a if t.isdigit() and len(t) == 4}
     years_b = {t for t in b if t.isdigit() and len(t) == 4}
@@ -232,7 +234,8 @@ def _time_agreement(a: Set[str], b: Set[str]) -> float:
         "may","jun","june","jul","july","aug","august","sep","sept","september",
         "oct","october","nov","november","dec","december"
     }
-    m_a = a & months; m_b = b & months
+    m_a = a & months
+    m_b = b & months
     if m_a and m_b:
         return 1.0 if m_a & m_b else 0.0
     return 0.0
@@ -245,7 +248,7 @@ def _distance(i: int, j: int) -> float:
 def _has_negation(tokens: Iterable[str]) -> bool:
     return any(t in _NEG_MARKERS for t in tokens)
 
-def _negation_conflict(claim_toks: Set[str], s1_toks: Set[str], s2_toks: Set[str]) -> float:
+def _negation_conflict(claim_toks: set[str], s1_toks: set[str], s2_toks: set[str]) -> float:
     # conflict if claim polarity differs from either leaf polarity (simple presence-of-negation check)
     c_neg = _has_negation(claim_toks)
     e1_neg = _has_negation(s1_toks)
@@ -258,13 +261,13 @@ def _source_prefix(src: str) -> str:
     return (src or "").split(":", 1)[0] if src else ""
 
 def build_pair_features(
-    claim_tokens: List[str],
-    candidates: List[SentenceCandidate],
-    token_cache: Dict[int, Set[str]],
-    frontier_idx: List[int],
-    pool2_idx: List[int],
-    p1: List[float],
-) -> Tuple[List[Tuple[int, int]], List[Dict[str, float]]]:
+    claim_tokens: list[str],
+    candidates: list[SentenceCandidate],
+    token_cache: dict[int, set[str]],
+    frontier_idx: list[int],
+    pool2_idx: list[int],
+    p1: list[float],
+) -> tuple[list[tuple[int, int]], list[dict[str, float]]]:
     """
     Return:
       pairs: List[(i,j)]
@@ -283,11 +286,11 @@ def build_pair_features(
         } 
     """
     cset = set(claim_tokens or [])
-    pairs: List[Tuple[int, int]] = []
-    feats: List[Dict[str, float]] = []
+    pairs: list[tuple[int, int]] = []
+    feats: list[dict[str, float]] = []
 
     # precompute token sets per candidate id (via token_cache or fresh)
-    def _tok(i: int) -> Set[str]:
+    def _tok(i: int) -> set[str]:
         if i in token_cache:
             return token_cache[i]
         token_cache[i] = _token_set(candidates[i].text)
@@ -305,7 +308,9 @@ def build_pair_features(
             dist = _distance(i, j)
             maxp1 = float(max(p1[i] if i < len(p1) else 0.0, p1[j] if j < len(p1) else 0.0))
             # novelty: how much new token mass j adds beyond i
-            add = len(tj - ti); base = len(tj | ti) or 1
+            add = len(tj - ti)
+            base = len(tj | ti) or 1
+
             novelty = add / base
             ce_max = float(max(candidates[i].ce_score or 0.0, candidates[j].ce_score or 0.0))
 

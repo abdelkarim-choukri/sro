@@ -1,7 +1,8 @@
 # sro/prover/s7_safety.py
 from typing import Tuple
 
-def safe_to_ship(score_star: float, cmax: float, delta: float) -> Tuple[bool, str]:
+
+def safe_to_ship(score_star: float, cmax: float, delta: float) -> tuple[bool, str]:
     """
     Safety rule: Ship only if (score_star - cmax) >= delta.
     All inputs are probabilities in [0,1].

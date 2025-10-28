@@ -1,7 +1,10 @@
 # sro/nli/pairs.py
 from typing import List, Tuple
+
 import torch
+
 from sro.utils.batching import batched
+
 
 class PairNLI:
     def __init__(self, tokenizer, model):
@@ -9,7 +12,7 @@ class PairNLI:
         self.model = model.eval()
 
     @torch.inference_mode()
-    def score_pairs(self, pairs: List[Tuple[str,str,str]],
+    def score_pairs(self, pairs: list[tuple[str,str,str]],
                     batch_size: int = 32, device: str = "cuda") -> torch.Tensor:
         """
         pairs: list of (s1, s2, hypothesis) strings.

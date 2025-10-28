@@ -21,12 +21,14 @@ Notes:
 """
 
 from __future__ import annotations
+
 import os
+from collections.abc import Sequence
 from pathlib import Path
-from typing import List, Sequence, Tuple, Optional
+from typing import List, Optional, Tuple
 
 import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 # ------------------------------
 # Offline/cache discipline
@@ -50,7 +52,7 @@ _MAX_LEN = 512
 
 class _NLIBackend:
     """Internal singleton that holds model & tokenizer and exposes batched scoring."""
-    _instance: Optional["_NLIBackend"] = None
+    _instance: _NLIBackend | None = None
 
     def __init__(self, model_name: str = _DEFAULT_MODEL):
         self._dev_pref = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -73,7 +75,7 @@ class _NLIBackend:
         self._id_ent, self._id_contra = self._resolve_label_ids(self.model)
 
     @staticmethod
-    def _resolve_label_ids(model) -> Tuple[int, int]:
+    def _resolve_label_ids(model) -> tuple[int, int]:
         # Try explicit label2id / id2label first
         ent_id = None
         contra_id = None
@@ -100,7 +102,7 @@ class _NLIBackend:
         return ent_id, contra_id
 
     @classmethod
-    def get(cls) -> "_NLIBackend":
+    def get(cls) -> _NLIBackend:
         if cls._instance is None:
             cls._instance = _NLIBackend(_DEFAULT_MODEL)
         return cls._instance
@@ -111,13 +113,13 @@ class _NLIBackend:
         premises: Sequence[str],
         hypotheses: Sequence[str],
         batch_size: int = 16,
-    ) -> Tuple[List[float], List[float]]:
+    ) -> tuple[list[float], list[float]]:
         """Return (p_entail, p_contradict) for each (premise, hypothesis)."""
         if len(premises) != len(hypotheses):
             raise ValueError("premises and hypotheses must have same length")
 
-        p_entail: List[float] = []
-        p_contra: List[float] = []
+        p_entail: list[float] = []
+        p_contra: list[float] = []
 
         for start in range(0, len(premises), batch_size):
             end = min(len(premises), start + batch_size)
@@ -172,7 +174,7 @@ class _NLIBackend:
 
 # ---------- Public API ----------
 
-def one_hop_scores(claim: str, sentences: Sequence[str], batch_size: int = 16) -> Tuple[List[float], List[float]]:
+def one_hop_scores(claim: str, sentences: Sequence[str], batch_size: int = 16) -> tuple[list[float], list[float]]:
     """Per sentence: p1 (entail) and c1 (contradict) for (sentence -> claim)."""
     if not sentences:
         return [], []
@@ -185,10 +187,10 @@ def one_hop_scores(claim: str, sentences: Sequence[str], batch_size: int = 16) -
 
 def two_hop_scores(
     claim: str,
-    pairs: Sequence[Tuple[str, str]],
+    pairs: Sequence[tuple[str, str]],
     sep: str = " [SEP] ",
     batch_size: int = 16,
-) -> List[float]:
+) -> list[float]:
     """
     For each pair (sent_i, sent_j), compute p2 entail for ((sent_i + SEP + sent_j) -> claim).
     """

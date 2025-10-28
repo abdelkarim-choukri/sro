@@ -1,6 +1,7 @@
 from sro.claims.splitter import draft_and_claims
-from sro.types import SentenceCandidate
 from sro.config import load_config
+from sro.types import SentenceCandidate
+
 
 def test_hedge_and_reliability_filter():
     cfg = load_config()

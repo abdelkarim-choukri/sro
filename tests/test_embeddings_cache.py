@@ -1,7 +1,10 @@
 # tests/test_embeddings_cache.py
 import os
+
 import numpy as np
+
 from sro.embeddings.backend import EmbeddingBackend
+
 
 def test_embedding_cache_persistence(tmp_path, monkeypatch):
     # Redirect cache to temp dir

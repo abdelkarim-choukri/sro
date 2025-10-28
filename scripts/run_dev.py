@@ -1,7 +1,9 @@
 from __future__ import annotations
+
 from sro.config import load_config
-from sro.types import Claim, SentenceCandidate
 from sro.prover import SROProver
+from sro.types import Claim, SentenceCandidate
+
 
 def main():
     cfg = load_config()

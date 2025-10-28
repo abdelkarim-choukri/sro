@@ -35,7 +35,7 @@ def test_trace_row_schema(tmp_path):
     emit_trace(row, str(log_path))
 
     assert os.path.exists(log_path)
-    with open(log_path, "r", encoding="utf-8") as f:
+    with open(log_path, encoding="utf-8") as f:
         lines = [ln.strip() for ln in f if ln.strip()]
     assert len(lines) >= 1
     got = json.loads(lines[-1])

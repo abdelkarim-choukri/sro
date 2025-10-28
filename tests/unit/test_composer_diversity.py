@@ -1,5 +1,6 @@
 from sro.compose.answer import compose_answer_with_citations
 
+
 def test_source_diversity_enforced():
     accepted = [
         {"text":"Apple released the iPhone 15 series in 2023.", "score":0.99,

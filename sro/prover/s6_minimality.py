@@ -1,13 +1,14 @@
 # sro/prover/s6_minimality.py
-from typing import Tuple, Optional
+from typing import Optional, Tuple
+
 
 def is_minimal(
     p1_i: float,
     p1_j: float,
     tau1: float,
-    leaf_i: Optional[str] = None,
-    leaf_j: Optional[str] = None,
-) -> Tuple[bool, str]:
+    leaf_i: str | None = None,
+    leaf_j: str | None = None,
+) -> tuple[bool, str]:
     """
     Minimality rule (2-hop): valid iff NEITHER leaf alone crosses tau1.
     Returns (ok, reason_if_not).

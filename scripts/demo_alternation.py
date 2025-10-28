@@ -6,9 +6,11 @@ fetch_more() injects a targeted sentence, then the prover ships.
 """
 
 from __future__ import annotations
+
 from sro.config import load_config
-from sro.types import Claim, SentenceCandidate
 from sro.prover import SROProver
+from sro.types import Claim, SentenceCandidate
+
 
 def my_fetch_more(**kwargs):
     # kwargs: claim, candidates, frontier_idx, pool2_idx, p1, top_ub

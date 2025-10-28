@@ -28,9 +28,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import joblib
 import numpy as np
@@ -40,9 +41,9 @@ LOGGER = logging.getLogger("sro.prover.ub_model")
 # Try to import sklearn. If missing, we throw a clear error at train time.
 try:  # pragma: no cover
     from sklearn.ensemble import GradientBoostingRegressor
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.pipeline import Pipeline
     from sklearn.model_selection import train_test_split
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
 except Exception:  # pragma: no cover
     GradientBoostingRegressor = None  # type: ignore
     StandardScaler = None  # type: ignore
@@ -50,7 +51,7 @@ except Exception:  # pragma: no cover
     train_test_split = None  # type: ignore
 
 
-DEFAULT_FEATURES: Tuple[str, ...] = (
+DEFAULT_FEATURES: tuple[str, ...] = (
     "best_so_far",
     "top_ub",
     "budget_left_norm",
@@ -102,7 +103,7 @@ def compute_coverage(y_true: np.ndarray, ub_pred: np.ndarray) -> float:
 class UBMeta:
     alpha: float
     q_hat: float
-    feature_names: List[str]
+    feature_names: list[str]
     base_model: str
     updated_at: str
     version: str = "1.0"
@@ -142,7 +143,7 @@ class QuantileUB:
             ]
         )
 
-    def fit(self, X: np.ndarray, y: np.ndarray) -> "QuantileUB":
+    def fit(self, X: np.ndarray, y: np.ndarray) -> QuantileUB:
         if X.shape[0] != y.shape[0]:
             raise ValueError("X and y length mismatch.")
         self.model.fit(X, y)
@@ -165,11 +166,11 @@ class ConformalUB:
       - Optional floor: UB(x) = max(UB(x), floor)  (e.g., best_so_far)
     """
 
-    def __init__(self, base: QuantileUB, alpha: float = 0.025, feature_names: Optional[Sequence[str]] = None):
+    def __init__(self, base: QuantileUB, alpha: float = 0.025, feature_names: Sequence[str] | None = None):
         self.base = base
         self.alpha = float(alpha)
         self.q_hat: float = 0.0
-        self.feature_names: List[str] = list(feature_names) if feature_names is not None else []
+        self.feature_names: list[str] = list(feature_names) if feature_names is not None else []
 
     # ----------------- fit -----------------
     def fit(  # pure compute
@@ -178,7 +179,7 @@ class ConformalUB:
         y_train: np.ndarray,
         X_calib: np.ndarray,
         y_calib: np.ndarray,
-    ) -> "ConformalUB":
+    ) -> ConformalUB:
         self.base.fit(X_train, y_train)
         y_hat_calib = self.base.predict(X_calib)
         residuals = (y_calib - y_hat_calib).astype("float32")
@@ -186,7 +187,7 @@ class ConformalUB:
         return self
 
     # ----------------- predict -----------------
-    def predict_upper_bound(self, X: np.ndarray, floor: Optional[np.ndarray] = None) -> np.ndarray:
+    def predict_upper_bound(self, X: np.ndarray, floor: np.ndarray | None = None) -> np.ndarray:
         """
         Predict upper bound. If 'floor' is provided (same shape), clamp UB >= floor.
         """
@@ -215,13 +216,13 @@ class ConformalUB:
             json.dump(meta.__dict__, f, indent=2)
 
     @classmethod
-    def load(cls, in_dir: str) -> "ConformalUB":
+    def load(cls, in_dir: str) -> ConformalUB:
         model_path = os.path.join(in_dir, "ub_model.pkl")
         meta_path = os.path.join(in_dir, "ub_meta.json")
         if not (os.path.isfile(model_path) and os.path.isfile(meta_path)):
             raise FileNotFoundError(f"UB artifacts missing in: {in_dir}")
         pipe = joblib.load(model_path)
-        with open(meta_path, "r", encoding="utf-8") as f:
+        with open(meta_path, encoding="utf-8") as f:
             meta = json.load(f)
         # Rehydrate
         base = QuantileUB(alpha=0.98)  # alpha of base regressor is not critical once trained

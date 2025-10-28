@@ -11,8 +11,10 @@ Set use_model=True from the orchestrator when you're ready.
 """
 
 from __future__ import annotations
-from typing import List, Tuple, Iterable
+
 import re
+from collections.abc import Iterable
+from typing import List, Tuple
 
 from sro.types import SentenceCandidate
 
@@ -26,7 +28,7 @@ POS_WORDS = {
     "released", "announced", "launched", "introduced", "unveiled"
 }
 
-def _tokens(s: str) -> List[str]:
+def _tokens(s: str) -> list[str]:
     if not isinstance(s, str):
         raise ValueError("Text must be a string")
     return [t.lower() for t in _WORD_RE.findall(s)]
@@ -34,13 +36,13 @@ def _tokens(s: str) -> List[str]:
 def _negation_score(tokens: Iterable[str]) -> float:
     return 1.0 if any(t in NEG_WORDS for t in tokens) else 0.0
 
-def _overlap_ratio(claim_toks: List[str], sent_toks: List[str]) -> float:
+def _overlap_ratio(claim_toks: list[str], sent_toks: list[str]) -> float:
     if not claim_toks:
         return 0.0
     a, b = set(claim_toks), set(sent_toks)
     return len(a & b) / max(1, len(a))
 
-def _heuristic_scores(claim: str, texts: List[str]) -> Tuple[List[float], List[float]]:
+def _heuristic_scores(claim: str, texts: list[str]) -> tuple[list[float], list[float]]:
     claim_toks = _tokens(claim)
     neg_claim = _negation_score(claim_toks)
     p1, c1 = [], []
@@ -57,7 +59,7 @@ def _heuristic_scores(claim: str, texts: List[str]) -> Tuple[List[float], List[f
 
 # ---------------- Public API ----------------
 
-def one_hop_scores(claim: str, candidates: List[SentenceCandidate], use_model: bool = False, batch_size: int = 16) -> Tuple[List[float], List[float]]:
+def one_hop_scores(claim: str, candidates: list[SentenceCandidate], use_model: bool = False, batch_size: int = 16) -> tuple[list[float], list[float]]:
     """
     If use_model=False: return heuristic scores (fast).
     If use_model=True: use real MNLI model from sro.nli.nli_infer.
@@ -72,7 +74,7 @@ def one_hop_scores(claim: str, candidates: List[SentenceCandidate], use_model: b
         from sro.nli.nli_infer import one_hop_scores as nli_one_hop
         p_ent, p_contra = nli_one_hop(claim, texts, batch_size=batch_size)
         return p_ent, p_contra
-    except Exception as e:
+    except Exception:
         # Fail safe to heuristic if model failed to load; surface a warning-like behavior
         # (We do not print; just fallback deterministically)
         return _heuristic_scores(claim, texts)

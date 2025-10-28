@@ -21,10 +21,10 @@ import numpy as np
 import pandas as pd
 
 from sro.prover.ub_model import (
+    DEFAULT_FEATURES,
     ConformalUB,
     build_feature_matrix,
     compute_coverage,
-    DEFAULT_FEATURES,
 )
 
 logging.basicConfig(
@@ -34,7 +34,7 @@ logging.basicConfig(
 LOGGER = logging.getLogger("scripts.tune_ub")
 
 
-def _resolve_features_arg(arg_val: str, conf: ConformalUB) -> Tuple[str, tuple]:
+def _resolve_features_arg(arg_val: str, conf: ConformalUB) -> tuple[str, tuple]:
     """
     Returns (origin, feature_names) where origin in {"model","arg","default"}.
     - If arg_val is empty or "auto": use conf.feature_names if present; else DEFAULT_FEATURES.

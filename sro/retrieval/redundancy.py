@@ -23,8 +23,11 @@ Notes:
     Deterministic tie-breaking: higher p1, then lower index.
 """
 from __future__ import annotations
-from typing import List, Optional, Dict
+
+from typing import Dict, List, Optional
+
 import numpy as np
+
 from sro.embeddings.backend import EmbeddingBackend
 
 
@@ -35,15 +38,15 @@ def _ensure_unit_norm(mat: np.ndarray) -> np.ndarray:
 
 
 def mmr_select_cosine(
-    texts: List[str],
-    ids: Optional[List[Optional[str]]],
+    texts: list[str],
+    ids: list[str | None] | None,
     p1_scores: np.ndarray,
     M: int,
     *,
     mmr_lambda: float = 0.5,
     sim_threshold: float = 0.9,
     embed_backend: EmbeddingBackend,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     assert isinstance(p1_scores, np.ndarray) and p1_scores.ndim == 1, "p1_scores must be 1D np.ndarray"
     N = len(texts)
     assert N == p1_scores.shape[0], "texts and p1_scores length mismatch"
@@ -63,7 +66,7 @@ def mmr_select_cosine(
     vecs = _ensure_unit_norm(vecs)
 
     max_sim = np.zeros((N,), dtype=np.float32)
-    selected: List[int] = []
+    selected: list[int] = []
     in_selected = np.zeros((N,), dtype=bool)
 
     # order: higher p1, then lower index

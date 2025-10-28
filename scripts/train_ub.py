@@ -22,11 +22,11 @@ import numpy as np
 import pandas as pd
 
 from sro.prover.ub_model import (
+    DEFAULT_FEATURES,
     ConformalUB,
     QuantileUB,
     build_feature_matrix,
     compute_coverage,
-    DEFAULT_FEATURES,
 )
 
 logging.basicConfig(
@@ -38,6 +38,7 @@ LOGGER = logging.getLogger("scripts.train_ub")
 
 def set_all_seeds(seed: int) -> None:
     import random
+
     import numpy as np
 
     random.seed(seed)

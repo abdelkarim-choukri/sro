@@ -61,7 +61,7 @@ _PREMISE_ALIASES = {
 _HYPO_ALIASES = {"hypothesis","h","claim","claim_text","statement"}
 _LABEL_ALIASES = {"gold_label","label","y","target","verdict","nli_label","fever_label","hover_label"}
 
-_LABEL_NORMALIZER: Dict[str, str] = {
+_LABEL_NORMALIZER: dict[str, str] = {
     # entailment
     "entailment": "entailment", "e": "entailment",
     "supports": "entailment", "support": "entailment", "supported": "entailment",
@@ -76,7 +76,7 @@ _LABEL_NORMALIZER: Dict[str, str] = {
     "unknown": "neutral", "ambiguous": "neutral",
 }
 
-def _resolve_columns(df: pd.DataFrame, premise_col: str | None, hypothesis_col: str | None, label_col: str | None) -> Tuple[str, str, str]:
+def _resolve_columns(df: pd.DataFrame, premise_col: str | None, hypothesis_col: str | None, label_col: str | None) -> tuple[str, str, str]:
     cols_lc = {c.lower(): c for c in df.columns}
     def _pick(aliases: set[str]) -> str | None:
         for a in aliases:
@@ -106,7 +106,7 @@ def _device_auto() -> str:
 def _normalize_label_string(s: str) -> str:
     return s.strip().lower().replace("-", "_")
 
-def _map_to_backend_index(name: str, label_to_index: Dict[str, int]) -> int:
+def _map_to_backend_index(name: str, label_to_index: dict[str, int]) -> int:
     """
     Map normalized NLI label name to backend index, supporting binary backends.
     name ∈ {'entailment','contradiction','neutral'} after normalization.
@@ -142,15 +142,15 @@ def main() -> None:
         df = df.iloc[: args.max_rows].copy()
 
     p_col, h_col, y_col = _resolve_columns(df, args.premise_col, args.hypothesis_col, args.label_col)
-    premises: List[str] = df[p_col].astype(str).tolist()
-    hypotheses: List[str] = df[h_col].astype(str).tolist()
-    raw_labels: List[str] = df[y_col].astype(str).tolist()
+    premises: list[str] = df[p_col].astype(str).tolist()
+    hypotheses: list[str] = df[h_col].astype(str).tolist()
+    raw_labels: list[str] = df[y_col].astype(str).tolist()
 
     backend = NLIBackend(device=device, model_dir=args.model_dir)
     label_to_index = backend.label_to_index  # tri-class or binary
 
-    normalized_indices: List[int] = []
-    bads: List[str] = []
+    normalized_indices: list[int] = []
+    bads: list[str] = []
     for s in raw_labels:
         base = _normalize_label_string(s)
         base = _LABEL_NORMALIZER.get(base, base)  # map booleans/fever to {entailment,contradiction,neutral}

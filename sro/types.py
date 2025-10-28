@@ -1,6 +1,7 @@
 from __future__ import annotations
-from dataclasses import dataclass, asdict, field
-from typing import List, Optional, Tuple, Literal, Dict, Any
+
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 # -----------------------
 # Simple string enums
@@ -45,20 +46,20 @@ class Edge:
     For 1-hop: src = (sent_id,)
     For 2-hop: src = (sent_id_i, sent_id_j)
     """
-    src: Tuple[str, ...]        # ("s1",) or ("s1","s2")
+    src: tuple[str, ...]        # ("s1",) or ("s1","s2")
     dst: str                    # claim_id
     label: Label                # "entail" | "neutral" | "contradict"
     p_entail: float             # entailment prob in [0,1]
     p_contradict: float         # contradiction prob in [0,1]
-    model: Optional[str] = None # optional model name (e.g., "roberta-large-mnli")
+    model: str | None = None # optional model name (e.g., "roberta-large-mnli")
 
 
 @dataclass
 class ProofObject:
     claim_id: str
-    leaves: List[str]
-    edges: List[Edge]
-    citations: List[Dict[str, str]] = field(default_factory=list)
+    leaves: list[str]
+    edges: list[Edge]
+    citations: list[dict[str, str]] = field(default_factory=list)
     score: float = 0.0
     cmax: float = 0.0
     margin: float = 0.0
@@ -69,7 +70,7 @@ class ProofObject:
     budget_used: int = 0             # # pair evals consumed
     ub_top_remaining: float = 0.0    # best UB left when stopping
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "claim_id": self.claim_id,
             "leaves": list(self.leaves),
@@ -95,5 +96,5 @@ class ProverResult:
       - REJECT with a reason
     """
     status: Status
-    proof: Optional[ProofObject] = None
-    reason: Optional[RejectReason] = None
+    proof: ProofObject | None = None
+    reason: RejectReason | None = None

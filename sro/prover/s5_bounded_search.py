@@ -4,26 +4,27 @@ Returns (best_pair, best_p2, evals, stop_reason, top_ub_remaining).
 """
 
 from __future__ import annotations
+
 import heapq
 from contextlib import nullcontext
-from typing import List, Tuple, Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
+from sro.prover.s4_ub import UBWeights, clamp01, upper_bound
 from sro.types import SentenceCandidate
-from sro.prover.s4_ub import upper_bound, UBWeights, clamp01
 from sro.utils.timing import StageTimer
 
 
 class TwoHopScorer:
-    def score_pairs(self, pairs: List[Tuple[int, int]]) -> List[float]:
+    def score_pairs(self, pairs: list[tuple[int, int]]) -> list[float]:
         raise NotImplementedError
 
 
 # Return shape includes: top_ub_remaining (float)
-class SearchResult(Tuple[Optional[Tuple[int, int]], float, int, str, float]):
+class SearchResult(tuple[tuple[int, int] | None, float, int, str, float]):
     pass
 
 
-def _p2_stub(feats: Dict[str, float]) -> float:
+def _p2_stub(feats: dict[str, float]) -> float:
     # Fallback heuristic when a real 2-hop scorer is unavailable (offline stub).
     p2 = (
         0.60 * feats.get("max_p1", 0.0)
@@ -36,17 +37,17 @@ def _p2_stub(feats: Dict[str, float]) -> float:
 
 def bounded_search(
     claim: str,
-    candidates: List[SentenceCandidate],
-    pairs: List[Tuple[int, int]],
-    feats: List[Dict[str, float]],
-    p1: List[float],
+    candidates: list[SentenceCandidate],
+    pairs: list[tuple[int, int]],
+    feats: list[dict[str, float]],
+    p1: list[float],
     tau1: float,
     B: int,
     kappa: float,
     ub_weights: UBWeights = UBWeights(),
-    two_hop_scorer: Optional[TwoHopScorer] = None,
+    two_hop_scorer: TwoHopScorer | None = None,
     batch_size: int = 16,
-    timer: Optional[StageTimer] = None,
+    timer: StageTimer | None = None,
 ) -> SearchResult:
     """
     Args:
@@ -74,7 +75,7 @@ def bounded_search(
     with (timer.stage("S4_ub") if timer else nullcontext()):
         if not pairs:
             return None, 0.0, 0, "NO_PAIRS", 0.0
-        heap: List[Tuple[float, int]] = []
+        heap: list[tuple[float, int]] = []
         for k, f in enumerate(feats):
             ub = upper_bound(f, kappa, ub_weights)
             if not (0.0 <= ub <= 1.0):
@@ -97,9 +98,9 @@ def bounded_search(
                 stop_reason = "UB_BEATEN"
                 break
 
-            batch_keys: List[int] = []
-            batch_pairs: List[Tuple[int, int]] = []
-            batch_feats: List[Dict[str, float]] = []
+            batch_keys: list[int] = []
+            batch_pairs: list[tuple[int, int]] = []
+            batch_feats: list[dict[str, float]] = []
 
             # Pop into a batch while UB still promising
             while heap and len(batch_keys) < batch_size:

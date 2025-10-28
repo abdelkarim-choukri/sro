@@ -1,7 +1,11 @@
 # sro/utils/hf.py
 from __future__ import annotations
-from typing import Optional, Iterable
-import os, time
+
+import os
+import time
+from collections.abc import Iterable
+from typing import Optional
+
 from huggingface_hub import snapshot_download
 
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
@@ -9,7 +13,7 @@ os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 def ensure_repo_local(
     repo_id: str,
     local_dir: str = "models_cache",
-    allow_patterns: Optional[Iterable[str]] = None,
+    allow_patterns: Iterable[str] | None = None,
     retries: int = 3,
     backoff: float = 2.0,
 ) -> str:

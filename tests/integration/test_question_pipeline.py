@@ -1,12 +1,13 @@
 from __future__ import annotations
-from pathlib import Path
-import json
 
-from sro.config import load_config
+import json
+from pathlib import Path
+
 from sro.claims.splitter import draft_and_claims
-from sro.retrieval.hybrid import get_initial_candidates, make_fetch_more
+from sro.config import load_config
 from sro.prover import SROProver
 from sro.rerank.cross_encoder import CrossEncoderReranker
+from sro.retrieval.hybrid import get_initial_candidates, make_fetch_more
 from sro.types import Claim
 
 CORPUS = Path("data/corpus/corpus.jsonl")

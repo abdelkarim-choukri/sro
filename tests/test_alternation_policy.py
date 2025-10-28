@@ -1,5 +1,6 @@
 # tests/test_alternation_policy.py
-from sro.prover.s8_alternation import PolicyMeta, AlternationPolicy
+from sro.prover.s8_alternation import AlternationPolicy, PolicyMeta
+
 
 def _policy(tau1=0.75, delta=0.10, thr=0.5):
     meta = PolicyMeta(

@@ -1,8 +1,12 @@
 from __future__ import annotations
-import csv, os
+
+import csv
+import os
 from pathlib import Path
-from sro.config import load_config, apply_env_overrides
-from sro.prover.s4_ub import UBWeights, upper_bound, clamp01
+
+from sro.config import apply_env_overrides, load_config
+from sro.prover.s4_ub import UBWeights, clamp01, upper_bound
+
 
 def _UB(feats, kappa, w):
     try:
@@ -11,7 +15,8 @@ def _UB(feats, kappa, w):
         return upper_bound(feats, kappa=kappa, ub_weights=w)
 
 def test_dev_pairs_coverage_ge_975():
-    cfg = load_config(); apply_env_overrides(cfg)
+    cfg = load_config()
+    apply_env_overrides(cfg)
     kappa = float(cfg.sro_prover.kappa)
     p2, ub = [], []
     w = UBWeights()

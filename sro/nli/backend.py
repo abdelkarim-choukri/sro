@@ -23,18 +23,21 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Mapping, Sequence
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+_ALLOW_DUMMY_NLI = os.getenv("SRO_ALLOW_DUMMY_NLI", "") == "1"
+
 _LOGGER = logging.getLogger("sro.nli.backend")
 
 
 # ---------------------------- label handling ----------------------------
-def _normalize_nli_label_map(id2label: Mapping[int, str]) -> Dict[str, int]:
+def _normalize_nli_label_map(id2label: Mapping[int, str]) -> dict[str, int]:
     """
     Build a name->index map for NLI classes from an HF id2label.
 
@@ -45,7 +48,7 @@ def _normalize_nli_label_map(id2label: Mapping[int, str]) -> Dict[str, int]:
     Fails loudly if neither pattern is present.
     """
     names = {int(k): str(v).strip().lower().replace(" ", "_").replace("-", "_") for k, v in id2label.items()}
-    inv: Dict[str, int] = {}
+    inv: dict[str, int] = {}
     for i, n in names.items():
         if n in ("entailment", "entails"):
             inv["entailment"] = i
@@ -79,7 +82,7 @@ def _read_temperature_json(path: str, model_name: str) -> float:
     JSON: {"model": "<name or basename>", "T": float, "updated_at": iso8601}
     """
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             payload = json.load(f)
         if not isinstance(payload, dict) or "T" not in payload or "model" not in payload:
             _LOGGER.warning("Calibration JSON schema invalid; ignoring.")
@@ -126,140 +129,187 @@ class _Batch:
 
 class NLIBackend:
     """
-    Offline-first NLI wrapper with calibrated scoring.
+    Natural Language Inference backend with:
+      - Real model (local-only) when available
+      - Deterministic dummy fallback when SRO_ALLOW_DUMMY_NLI=1 (for offline CPU tests)
 
-    Attrs:
-        model_name: str                         # id used for calibration matching
-        model_dir: str | None                   # explicit local dir if provided
-        label_to_index: Dict[str,int]           # tri-class or binary mapping
-        index_to_label: list[str]
-        is_binary: bool
-        temperature: float
+    Public surface kept minimal and stable:
+      - __init__(model_name: Optional[str] = None, device: Optional[str] = None, temperature: Optional[float] = None)
+      - score_pairs(premises: Sequence[str], hypotheses: Sequence[str], batch_size: int = 8) -> Dict[str, np.ndarray]
+      - set_temperature(T: float) / get_temperature() -> float
+
+    Output:
+      {"probs": np.ndarray of shape (N, 3)} ordered as [entailment, neutral, contradiction].
     """
 
     def __init__(
         self,
         model_name: str | None = None,
         device: str | None = None,
-        cache_dir: str = "models_cache",
-        temperature_json_path: str = "artifacts/calib/nli_temperature.json",
-        model_dir: str | None = None,
+        temperature: float | None = None,
     ) -> None:
-        self.model_name = model_name or os.environ.get(
-            "SRO_NLI_MODEL", "MoritzLaurer/deberta-v3-large-zeroshot-v2.0"
-        )
-        self.cache_dir = cache_dir
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.model_dir = model_dir or os.environ.get("SRO_NLI_MODEL_DIR")
+        self._dummy: bool = False
+        self.model_name: str = model_name or os.getenv("SRO_NLI_MODEL_NAME", "facebook/bart-large-mnli")
+        self.temperature: float = float(temperature if temperature is not None else os.getenv("SRO_NLI_TEMPERATURE", "1.0"))
 
-        errs: list[str] = []
-        tokenizer = None
-        model = None
+        # Common attrs some code relies on
+        self.label_to_index: dict[str, int] = {"entailment": 0, "neutral": 1, "contradiction": 2}
+        self.index_to_label: list[str] = ["entailment", "neutral", "contradiction"]
+        self._labels: list[str] = self.index_to_label.copy()
+        self.is_binary: bool = False
 
-        # Try 1: explicit local directory (preferred offline)
-        if self.model_dir:
-            try:
-                tokenizer = AutoTokenizer.from_pretrained(self.model_dir, local_files_only=True)
-                model = AutoModelForSequenceClassification.from_pretrained(self.model_dir, local_files_only=True)
-                # lock calibration identity to directory basename
-                self.model_name = os.path.basename(os.path.normpath(self.model_dir))
-            except Exception as e:
-                errs.append(f"[local model_dir] {type(e).__name__}: {e}")
+        # Decide device (respect SRO_DEVICE if set)
+        try:
+            import torch  # noqa: F401
+            has_torch = True
+        except Exception:
+            has_torch = False
 
-        # Try 2: repo id via cache_dir (offline)
-        if tokenizer is None or model is None:
-            try:
-                tokenizer = AutoTokenizer.from_pretrained(
-                    self.model_name, cache_dir=self.cache_dir, local_files_only=True
-                )
-                model = AutoModelForSequenceClassification.from_pretrained(
-                    self.model_name, cache_dir=self.cache_dir, local_files_only=True
-                )
-            except Exception as e:
-                errs.append(f"[cache_dir] {type(e).__name__}: {e}")
-
-        # Try 3: repo id via default HF cache (offline)
-        if tokenizer is None or model is None:
-            try:
-                tokenizer = AutoTokenizer.from_pretrained(self.model_name, local_files_only=True)
-                model = AutoModelForSequenceClassification.from_pretrained(self.model_name, local_files_only=True)
-            except Exception as e:
-                errs.append(f"[default cache] {type(e).__name__}: {e}")
-
-        if tokenizer is None or model is None:
-            _raise_offline_help(errs, self.model_name, self.model_dir, self.cache_dir)
-
-        self.tokenizer = tokenizer
-        self.model = model.to(self.device).eval()
-
-        # Labels
-        config = self.model.config
-        id2label = getattr(config, "id2label", {i: str(i) for i in range(config.num_labels)})
-        self.label_to_index = _normalize_nli_label_map(id2label)
-        self.is_binary = ("not_entailment" in self.label_to_index) and ("contradiction" not in self.label_to_index)
-        self.index_to_label = [str(id2label[i]).lower() for i in range(config.num_labels)]
-
-        # Temperature
-        self.temperature = _read_temperature_json(temperature_json_path, self.model_name)
-        if self.temperature != 1.0:
-            _LOGGER.info(f"NLI temperature = {self.temperature:.3f} (calibrated)")
+        dev_env = (os.getenv("SRO_DEVICE") or "").strip()
+        if device is not None:
+            self._device_str = device
+        elif dev_env:
+            self._device_str = dev_env
         else:
-            _LOGGER.info("NLI temperature = 1.000 (uncalibrated / default)")
+            if has_torch:
+                import torch  # type: ignore
+                self._device_str = "cuda" if torch.cuda.is_available() else "cpu"
+            else:
+                self._device_str = "cpu"
 
-        # Label scheme log
-        if self.is_binary:
-            _LOGGER.info("NLI label scheme: binary {'entailment','not_entailment'}")
-        else:
-            _LOGGER.info("NLI label scheme: 3-class {'entailment','contradiction','neutral'}")
+        # Try to load a real model from local cache; else dummy if allowed; else error.
+        try:
+            if not has_torch:
+                raise RuntimeError("PyTorch not available in this environment")
 
-    def _make_batches(self, premises: Sequence[str], hypotheses: Sequence[str], batch_size: int) -> Iterable[_Batch]:
-        assert len(premises) == len(hypotheses), "premises and hypotheses must be same length"
-        N = len(premises)
-        for i in range(0, N, batch_size):
-            toks = self.tokenizer(
-                list(premises[i : i + batch_size]),
-                list(hypotheses[i : i + batch_size]),
-                truncation=True,
-                padding=True,
-                return_tensors="pt",
-            )
-            yield _Batch(
-                input_ids=toks["input_ids"].to(self.device),
-                attention_mask=toks["attention_mask"].to(self.device),
+            import torch  # type: ignore
+            from transformers import (  # type: ignore
+                AutoModelForSequenceClassification,
+                AutoTokenizer,
             )
 
-    # ---------------------------- API ----------------------------
-    def predict_logits(self, premises: Sequence[str], hypotheses: Sequence[str], batch_size: int = 32) -> np.ndarray:
-        """Raw (uncalibrated) logits [N,C]."""
-        outs: list[np.ndarray] = []
-        with torch.no_grad():
-            for batch in self._make_batches(premises, hypotheses, batch_size):
-                logits = self.model(
-                    input_ids=batch.input_ids, attention_mask=batch.attention_mask
-                ).logits  # [B,C]
-                outs.append(logits.detach().cpu().numpy())
-        if not outs:
-            return np.zeros((0, self.model.config.num_labels), dtype=np.float32)
-        return np.concatenate(outs, axis=0)
+            # Prefer a fully local directory if present; otherwise rely on local_files_only=True.
+            local_dir_hint = os.getenv("SRO_NLI_LOCAL_DIR")
+            if local_dir_hint and os.path.isdir(local_dir_hint):
+                load_name = local_dir_hint
+            else:
+                # allow a local snapshot under models_cache/<repo_name>
+                cache_guess = os.path.join("models_cache", self.model_name.replace("/", "_"))
+                load_name = cache_guess if os.path.isdir(cache_guess) else self.model_name
 
+            self.tokenizer = AutoTokenizer.from_pretrained(load_name, local_files_only=True)
+            self.model = AutoModelForSequenceClassification.from_pretrained(load_name, local_files_only=True)
+            self.model.to(self._device_str)
+            self.model.eval()
+
+            # If the model exposes label mapping, respect it when reading logits
+            id2label = getattr(self.model.config, "id2label", None)
+            if id2label:
+                # Normalize to lowercase for robustness
+                rev = {str(v).lower(): int(k) for k, v in id2label.items()}
+                # Update our mapping if present
+                for lbl in ("entailment", "neutral", "contradiction"):
+                    if lbl in rev:
+                        self.label_to_index[lbl] = rev[lbl]
+        except Exception as e:
+            if _ALLOW_DUMMY_NLI:
+                # Minimal, deterministic, CPU-only dummy backend
+                self._dummy = True
+                self.model_name = "dummy-nli"
+                self.temperature = 1.0
+                self.label_to_index = {"entailment": 0, "neutral": 1, "contradiction": 2}
+                self.index_to_label = ["entailment", "neutral", "contradiction"]
+                self._labels = self.index_to_label.copy()
+            else:
+                # Keep the error explicit for real runs
+                raise RuntimeError(
+                    "NLI model could not be loaded locally. To run offline CI, set SRO_ALLOW_DUMMY_NLI=1. "
+                    f"Attempted model: {self.model_name}. Device: {self._device_str}. Error: {e}"
+                ) from e
+
+    # ----------------------------
+    # Temperature control
+    # ----------------------------
+    def set_temperature(self, T: float) -> None:
+        self.temperature = float(T)
+
+    def get_temperature(self) -> float:
+        return float(self.temperature)
+
+    # ----------------------------
+    # Core API
+    # ----------------------------
     def score_pairs(
         self,
         premises: Sequence[str],
         hypotheses: Sequence[str],
-        batch_size: int = 32,
-        return_logits: bool = False,
-    ) -> Dict[str, np.ndarray]:
-        """Calibrated probabilities; applies logits / T then softmax."""
-        raw = self.predict_logits(premises, hypotheses, batch_size)
-        logits = raw / float(self.temperature)
-        z = logits - np.max(logits, axis=1, keepdims=True)
-        ez = np.exp(z, dtype=np.float64)
-        probs = ez / np.sum(ez, axis=1, keepdims=True)
-        out = {"probs": probs.astype(np.float64)}
-        if return_logits:
-            out["logits"] = logits.astype(np.float64)
-        return out
+        batch_size: int = 8,
+    ) -> dict[str, np.ndarray]:
+        """
+        Score NLI for (premise, hypothesis) pairs.
 
-    def get_temperature(self) -> float:
-        """Return current temperature (1.0 if uncalibrated/missing)."""
-        return float(self.temperature)
+        Returns:
+            {"probs": np.ndarray of shape (N, 3)} in order [entailment, neutral, contradiction].
+        """
+        # Align sizes defensively
+        n = min(len(premises), len(hypotheses))
+        premises = list(premises)[:n]
+        hypotheses = list(hypotheses)[:n]
+
+        if self._dummy:
+            # Deterministic dummy: identical strings => strong entailment; else neutral-ish.
+            probs = np.zeros((n, 3), dtype=np.float32)
+            for i, (p, h) in enumerate(zip(premises, hypotheses)):
+                if str(p).strip() == str(h).strip():
+                    probs[i] = np.array([0.95, 0.05, 0.0], dtype=np.float32)
+                else:
+                    probs[i] = np.array([0.10, 0.85, 0.05], dtype=np.float32)
+            return {"probs": probs}
+
+        # Real model path
+        import torch  # type: ignore
+        from torch.nn.functional import softmax  # type: ignore
+
+        bs = max(1, int(batch_size))
+        out = np.zeros((n, 3), dtype=np.float32)
+
+        # Model label indices (might not be 0/1/2)
+        idx_ent = int(self.label_to_index.get("entailment", 0))
+        idx_neu = int(self.label_to_index.get("neutral", 1))
+        idx_con = int(self.label_to_index.get("contradiction", 2))
+
+        with torch.no_grad():
+            i = 0
+            while i < n:
+                j = min(i + bs, n)
+                p_batch = premises[i:j]
+                h_batch = hypotheses[i:j]
+
+                enc = self.tokenizer(
+                    p_batch,
+                    h_batch,
+                    padding=True,
+                    truncation=True,
+                    return_tensors="pt",
+                )
+                enc = {k: v.to(self._device_str) for k, v in enc.items()}
+                logits = self.model(**enc).logits  # (B, C)
+
+                T = max(1e-6, float(self.temperature))
+                logits = logits / T
+
+                pr = softmax(logits, dim=-1).detach().cpu().numpy()  # (B, C)
+
+                # Map to fixed order [entailment, neutral, contradiction]
+                # with safeguards if model has unexpected num_labels
+                def _safe(arr: np.ndarray, k: int) -> float:
+                    return float(arr[k]) if 0 <= k < arr.shape[0] else 0.0
+
+                for r in range(pr.shape[0]):
+                    out[i + r, 0] = _safe(pr[r], idx_ent)
+                    out[i + r, 1] = _safe(pr[r], idx_neu)
+                    out[i + r, 2] = _safe(pr[r], idx_con)
+
+                i = j
+
+        return {"probs": out}

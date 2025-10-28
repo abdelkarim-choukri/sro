@@ -11,6 +11,7 @@ Notes:
 """
 
 from __future__ import annotations
+
 import math
 from typing import Tuple
 
@@ -41,7 +42,7 @@ def compute_nll_from_logits(logits: np.ndarray, y: np.ndarray) -> float:
     return float(-np.mean(np.log(p_true)))
 
 
-def _bin_confidence(probs: np.ndarray, y: np.ndarray, n_bins: int = 20) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _bin_confidence(probs: np.ndarray, y: np.ndarray, n_bins: int = 20) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return per-bin (acc, conf, count)."""
     conf = probs.max(axis=1)
     pred = probs.argmax(axis=1)

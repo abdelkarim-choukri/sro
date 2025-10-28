@@ -1,13 +1,15 @@
 # scripts/demo_retrieval_fetch.py
 from __future__ import annotations
-import os, json
+
+import json
+import os
 from pathlib import Path
 
 from sro.config import load_config
-from sro.types import Claim, SentenceCandidate
 from sro.prover import SROProver
 from sro.rerank.cross_encoder import CrossEncoderReranker
 from sro.retrieval.hybrid import make_fetch_more
+from sro.types import Claim, SentenceCandidate
 
 CORPUS = Path("data/corpus/corpus.jsonl")
 
