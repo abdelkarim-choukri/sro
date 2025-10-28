@@ -88,13 +88,33 @@ def _brief_text(s: str, n: int = 140) -> str:
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser("E2E retrieval demo")
     ap.add_argument("--query", type=str, default="Does the iPhone 15 Pro have a titanium frame?")
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--profile", type=str, choices=["low", "med", "high"], default=None,
-                    help="Preset for (M,L,B) — affects downstream prover, here we just show config.")
-    ap.add_argument("--use_ce", type=str, choices=["auto", "on", "off"], default="auto",
-                    help="Force cross-encoder reranker: auto=cfg, on=force, off=disable")
+    ap.add_argument(
+        "--profile",
+        type=str,
+        choices=["low", "med", "high"],
+        default=None,
+        help="Preset for (M,L,B) — affects downstream prover; here we just show config.",
+    )
+    ap.add_argument(
+        "--use_ce",
+        type=str,
+        choices=["auto", "on", "off"],
+        default="auto",
+        help="Force cross-encoder reranker: auto=cfg, on=force, off=disable",
+    )
+    # NEW (P5 flags)
+    ap.add_argument("--use_faiss", action="store_true", help="Enable FAISS dense path if artifacts exist.")
+    ap.add_argument("--faiss_dir", type=str, default="artifacts/faiss", help="Directory with FAISS artifacts.")
+    ap.add_argument(
+        "--retrieval_mix",
+        type=str,
+        default="default",
+        choices=["default", "splade"],
+        help="Reserved for SPLADE toggle (disabled; raises NotImplementedError).",
+    )
     args = ap.parse_args()
 
     # Determinism first
@@ -127,9 +147,7 @@ def main():
     elif args.use_ce == "off":
         use_ce = False
     else:
-        # auto
         use_ce = use_ce_cfg
-    # env kill-switch still respected
     if os.getenv("SRO_DISABLE_RERANK") == "1":
         use_ce = False
 
@@ -152,6 +170,10 @@ def main():
         use_cross_encoder=bool(reranker is not None),
         cross_encoder=reranker,
         rerank_top=cfg.retrieval.rerank_top,
+        # NEW passthroughs
+        use_faiss=bool(args.use_faiss),
+        faiss_dir=args.faiss_dir,
+        retrieval_mix=args.retrieval_mix,
     )
 
     # Summary
@@ -162,10 +184,11 @@ def main():
         f"k_fused={cfg.retrieval.k_fused} "
         f"rrf_c={cfg.retrieval.rrf_c} "
         f"mmr_lambda={cfg.retrieval.mmr_lambda} "
-        f"ce={'on' if reranker is not None else 'off'}"
+        f"ce={'on' if reranker is not None else 'off'} "
+        f"faiss={'on' if args.use_faiss else 'off'}"
     )
 
-    # Dump top results (id, source_id, ce_score, text snippet)
+    # Dump top results
     if not hits:
         print("(no hits)")
         return

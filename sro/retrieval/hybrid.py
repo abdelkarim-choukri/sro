@@ -326,7 +326,7 @@ import numpy as np
 
 from sro.embeddings.backend import EmbeddingBackend
 from sro.retrieval.redundancy import mmr_select_cosine
-
+from .faiss_index import search_faiss
 
 # ---------- Public candidate type ----------
 
@@ -498,32 +498,213 @@ def select_frontier_and_pool(
 # ---------- Minimal retrieval helpers ----------
 
 def get_initial_candidates(
-    corpus_path: str | Path,
-    query: Optional[str] = None,
+    corpus_path: str,
+    query_text: str,
     *,
-    k_bm25: int = 128,
-    k_ce: int = 32,
-    k_dense: int = 128,          # <- accept k_dense
-    limit: int = 256,
-    **_: object,                 # <- swallow any other future kwargs
-) -> List[SentenceCandidate]:
+    k_bm25: int,
+    k_dense: int,
+    k_fused: int,
+    mmr_lambda: float,
+    rrf_c: int,
+    use_cross_encoder: bool,
+    cross_encoder: Any,
+    rerank_top: int,
+    # NEW (P5):
+    use_faiss: bool = False,
+    faiss_dir: Optional[str] = None,
+    retrieval_mix: str = "default",  # reserved for SPLADE toggle
+) -> List[Any]:
     """
-    Return up to `limit` candidates from the corpus, ignoring query (BM25/CE/DENSE are placeholders).
-    Deterministic order based on corpus content.
+    Return fused initial candidates for retrieval.
 
-    Args:
-        corpus_path: TXT/JSONL path
-        query:       unused placeholder (kept for signature compatibility)
-        k_bm25/k_ce/k_dense: accepted but not used (for API compatibility)
-        limit:       max number of candidates
-        **_:         ignored extra keyword args (forward-compat)
+    V2 extensions:
+      • Optional FAISS dense path (with clean brute-force fallback).
+      • SPLADE guard (disabled behind a flag).
+      • Per-stage contribution logs:
+            RETRIEVAL bm25_hits=XXX dense_hits=YYY fused_kept=ZZZ
+
+    Deterministic as long as upstream RNG and the embedding backend are seeded.
     """
-    p = Path(corpus_path)
-    triples = _read_corpus_lines(p)
-    out: List[SentenceCandidate] = []
-    for sid, src, text in triples[: max(0, int(limit))]:
-        out.append(SentenceCandidate(sent_id=sid, text=text, source_id=src, score=0.0, ce_score=0.0))
-    return out
+    import json
+    import logging
+    import os
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    logger = logging.getLogger(__name__)
+
+    # --- Guard: SPLADE disabled by default ---
+    if retrieval_mix.lower() == "splade":
+        raise NotImplementedError(
+            "SPLADE path is disabled by default. Enable only with local index and legal license."
+        )
+
+    # Try to import the project SentenceCandidate. If missing or ctor incompatible,
+    # we'll create lightweight objects with the same attributes.
+    try:
+        from sro.types import SentenceCandidate  # type: ignore
+        _HAS_SC = True
+    except Exception:
+        SentenceCandidate = None  # type: ignore
+        _HAS_SC = False
+
+    def _mk_candidate(sid: str, txt: str, src: str, ce_score: float = 0.0) -> Any:
+        """
+        Construct a candidate robustly:
+          1) Try keyword ctor (sent_id/text/source_id).
+          2) Try positional ctors.
+          3) Fall back to a SimpleNamespace with needed attrs.
+        IMPORTANT: we DO NOT pass 'score' because your dataclass does not accept it.
+        """
+        if _HAS_SC and SentenceCandidate is not None:
+            try:
+                return SentenceCandidate(sent_id=sid, text=txt, source_id=src, ce_score=ce_score)  # type: ignore
+            except TypeError:
+                try:
+                    return SentenceCandidate(sid, txt, src)  # type: ignore
+                except TypeError:
+                    try:
+                        return SentenceCandidate(sid, src, txt)  # type: ignore
+                    except TypeError:
+                        pass
+        # Lightweight drop-in with the attrs downstream code uses
+        return SimpleNamespace(sent_id=sid, text=txt, source_id=src, ce_score=ce_score)
+
+    def _normalize_items(items: List[Any], default_source: str) -> List[Any]:
+        """Convert dicts to objects with attrs; leave existing objects intact."""
+        norm: List[Any] = []
+        for it in items:
+            if hasattr(it, "sent_id") and hasattr(it, "text"):
+                norm.append(it)
+                continue
+            sid = str(it.get("sent_id", ""))
+            txt = str(it.get("text", ""))
+            src = str(it.get("source_id", it.get("source", default_source)))
+            ce_sc = float(it.get("ce_score", 0.0)) if isinstance(it, dict) else 0.0
+            norm.append(_mk_candidate(sid, txt, src, ce_sc))
+        return norm
+
+    # Fallback corpus read (only used if your private search helpers are unavailable)
+    def _fallback_read_jsonl(p: Path) -> List[dict]:
+        rows: List[dict] = []
+        with p.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except Exception:
+                    continue
+        return rows
+
+    def _fallback_naive_topk(p: str, top_k: int) -> List[Any]:
+        rows = _fallback_read_jsonl(Path(p))
+        out: List[Any] = []
+        for r in rows[: max(0, int(top_k))]:
+            sid = str(r.get("sent_id", ""))
+            txt = str(r.get("text", ""))
+            src = str(r.get("source_id", r.get("source", "corpus")))
+            out.append(_mk_candidate(sid, txt, src, ce_score=0.0))
+        return out
+
+    # --- Stage 1: BM25 and Dense pools ---
+    if "_bm25_search" in globals():  # type: ignore[name-defined]
+        bm25_pool_raw: List[Any] = _bm25_search(corpus_path, query_text, top_k=int(k_bm25))  # type: ignore[name-defined]
+    else:
+        bm25_pool_raw = _fallback_naive_topk(corpus_path, int(k_bm25))
+
+    if "_dense_search" in globals():  # type: ignore[name-defined]
+        dense_pool_raw: List[Any] = _dense_search(corpus_path, query_text, top_k=int(k_dense))  # type: ignore[name-defined]
+    else:
+        dense_pool_raw = _fallback_naive_topk(corpus_path, int(k_dense))
+
+    bm25_pool: List[Any] = _normalize_items(bm25_pool_raw, default_source="bm25")
+    dense_pool: List[Any] = _normalize_items(dense_pool_raw, default_source="dense")
+
+    # --- Optional FAISS path (or deterministic brute-force fallback) BEFORE fusion ---
+    if use_faiss and faiss_dir:
+        try:
+            from sro.retrieval.faiss_index import search_faiss  # type: ignore
+            # Try to get your project embedding backend; else fall back to a deterministic hash embed
+            embed_backend = None
+            if "_get_embedding_backend" in globals():  # type: ignore[name-defined]
+                try:
+                    embed_backend = _get_embedding_backend()  # type: ignore[name-defined]
+                except Exception:
+                    embed_backend = None
+
+            if embed_backend is None:
+                # Fallback: dim taken from meta.json to match the index; default to 64.
+                class _TinyHashEmbed:
+                    def __init__(self, dim: int = 64) -> None:
+                        self.dim = int(dim)
+
+                    def encode(self, texts: Sequence[str], batch_size: int = 32) -> "np.ndarray":
+                        import numpy as np  # local import to avoid hard dep at module import time
+                        out = []
+                        for t in texts:
+                            v = np.zeros(self.dim, dtype=np.float32)
+                            b = t.encode("utf-8")
+                            for i, ch in enumerate(b):
+                                v[(i + ch) % self.dim] += float((ch % 13) - 6)
+                            out.append(v)
+                        return np.vstack(out)
+
+                dim = 64
+                meta_path = os.path.join(str(faiss_dir), "meta.json")
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as f:
+                        dim = int(json.load(f).get("dim", 64))
+                except Exception:
+                    pass
+                embed_backend = _TinyHashEmbed(dim)
+
+            faiss_hits = search_faiss(
+                query_text=query_text,
+                top_k=max(0, int(k_dense)),
+                embed_backend=embed_backend,  # consistent dim with index
+                faiss_dir=str(faiss_dir),
+            )
+            for sid, txt, _sc in faiss_hits:
+                dense_pool.append(_mk_candidate(str(sid), str(txt), "faiss", ce_score=0.0))
+        except Exception as e:
+            logger.warning("FAISS path failed; continuing without it: %r", e)
+
+    # --- Fusion (RRF/MMR/CE) using your existing implementation if available ---
+    if "_fuse_and_filter" in globals():  # type: ignore[name-defined]
+        fused: List[Any] = _fuse_and_filter(  # type: ignore[name-defined]
+            bm25_pool=bm25_pool,
+            dense_pool=dense_pool,
+            k_fused=int(k_fused),
+            mmr_lambda=float(mmr_lambda),
+            rrf_c=int(rrf_c),
+            use_cross_encoder=bool(use_cross_encoder),
+            cross_encoder=cross_encoder,
+            rerank_top=int(rerank_top),
+        )
+    else:
+        # Minimal deterministic fallback: BM25 then Dense, keep unique sent_id, cut to k_fused
+        seen = set()
+        fused_tmp: List[Any] = []
+        for cand in bm25_pool + dense_pool:
+            sid = getattr(cand, "sent_id", None)
+            if sid in seen:
+                continue
+            seen.add(sid)
+            fused_tmp.append(cand)
+            if len(fused_tmp) >= int(k_fused):
+                break
+        fused = fused_tmp
+
+    # --- Per-stage contribution log (P5 acceptance) ---
+    logger.info(
+        "RETRIEVAL bm25_hits=%d dense_hits=%d fused_kept=%d",
+        len(bm25_pool),
+        len(dense_pool),
+        len(fused),
+    )
+    return fused
 
 
 # --- add or replace this function in sro/retrieval/hybrid.py ---

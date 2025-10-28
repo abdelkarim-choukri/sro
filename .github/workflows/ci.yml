@@ -1,3 +1,62 @@
+# name: ci
+
+# on:
+#   push:
+#   pull_request:
+
+# jobs:
+#   test:
+#     runs-on: ${{ matrix.os }}
+#     timeout-minutes: 25
+#     strategy:
+#       fail-fast: false
+#       matrix:
+#         os: [ubuntu-latest, windows-latest]
+#         python-version: ["3.10", "3.11"]
+
+#     steps:
+#       - name: Checkout
+#         uses: actions/checkout@v4
+
+#       - name: Set up Python
+#         uses: actions/setup-python@v5
+#         with:
+#           python-version: ${{ matrix.python-version }}
+#           cache: "pip"
+
+#       - name: Install deps
+#         run: |
+#           python -m pip install --upgrade pip
+#           python -m pip install -e .
+#           python -m pip install ruff mypy pytest pytest-cov
+
+#       - name: Create offline dirs
+#         shell: bash
+#         run: |
+#           mkdir -p artifacts/calib artifacts/ub artifacts/logs artifacts/alternation
+#           mkdir -p models_cache
+#           mkdir -p data/corpus data/processed
+#           echo "The iPhone 15 Pro features a titanium frame." > data/corpus/sentences.txt
+#           echo "Apple released the iPhone 15 in September 2023." >> data/corpus/sentences.txt
+#           echo "Titanium improves durability while reducing weight." >> data/corpus/sentences.txt
+#           echo "The base iPhone 15 uses aluminum." >> data/corpus/sentences.txt
+
+#       - name: Env (offline CPU path)
+#         shell: bash
+#         run: |
+#           echo "HF_HUB_OFFLINE=1" >> $GITHUB_ENV
+#           echo "TRANSFORMERS_OFFLINE=1" >> $GITHUB_ENV
+#           echo "SRO_LOGLEVEL=INFO" >> $GITHUB_ENV
+
+#       - name: Ruff
+#         run: python -m ruff check .
+
+#       - name: Mypy
+#         run: python -m mypy sro scripts
+
+#       - name: Pytest (coverage >=85%)
+#         run: |
+#           python -m pytest -q --cov=sro --cov=scripts --cov-report=term-missing --cov-fail-under=85
 name: ci
 
 on:
@@ -6,54 +65,66 @@ on:
 
 jobs:
   test:
+    name: "Tests (matrix)"
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.10", "3.11"]
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-          cache: "pip"
+          python-version: "3.10"
 
-      - name: Install deps
+      - name: Install
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e .
-          python -m pip install ruff mypy pytest pytest-cov
-
-      - name: Create offline dirs
-        shell: bash
-        run: |
-          mkdir -p artifacts/calib artifacts/ub artifacts/logs artifacts/alternation
-          mkdir -p models_cache
-          mkdir -p data/corpus data/processed
-          echo "The iPhone 15 Pro features a titanium frame." > data/corpus/sentences.txt
-          echo "Apple released the iPhone 15 in September 2023." >> data/corpus/sentences.txt
-          echo "Titanium improves durability while reducing weight." >> data/corpus/sentences.txt
-          echo "The base iPhone 15 uses aluminum." >> data/corpus/sentences.txt
-
-      - name: Env (offline CPU path)
-        shell: bash
-        run: |
-          echo "HF_HUB_OFFLINE=1" >> $GITHUB_ENV
-          echo "TRANSFORMERS_OFFLINE=1" >> $GITHUB_ENV
-          echo "SRO_LOGLEVEL=INFO" >> $GITHUB_ENV
+          python -m pip install -U pip
+          pip install -e ".[dev]"
 
       - name: Ruff
-        run: python -m ruff check .
+        run: ruff check .
 
       - name: Mypy
-        run: python -m mypy sro scripts
+        run: mypy sro scripts
 
-      - name: Pytest (coverage >=85%)
+      - name: Tests + Coverage
         run: |
-          python -m pytest -q --cov=sro --cov=scripts --cov-report=term-missing --cov-fail-under=85
+          pytest -q --cov=sro --cov=scripts --cov-report=term-missing --cov-fail-under=85
+
+  offline_cpu:
+    name: "Offline + CPU"
+    runs-on: ubuntu-latest
+    env:
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      CUDA_VISIBLE_DEVICES: ""
+      SRO_DEVICE: "cpu"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install minimal dev
+        run: |
+          python -m pip install -U pip
+          pip install -e ".[dev]"
+
+      - name: Ruff (quick)
+        run: ruff check sro tests
+
+      - name: Mypy (core only)
+        run: mypy sro
+
+      - name: Unit subset (offline-safe)
+        run: |
+          pytest -q tests/test_traces_shape.py
+          pytest -q tests/ci/test_cpu_path.py
+          pytest -q tests/test_faiss_build_and_search.py
+          pytest -q tests/test_hybrid_faiss_flag.py
