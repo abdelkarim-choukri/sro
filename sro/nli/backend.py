@@ -154,7 +154,7 @@ class NLIBackend:
             temperature if temperature is not None else os.getenv("SRO_NLI_TEMPERATURE", "1.0")
         )
 
-        # Common attrs some code relies on
+        # Common attributes some code relies on
         self.label_to_index: dict[str, int] = {"entailment": 0, "neutral": 1, "contradiction": 2}
         self.index_to_label: list[str] = ["entailment", "neutral", "contradiction"]
         self._labels: list[str] = self.index_to_label.copy()

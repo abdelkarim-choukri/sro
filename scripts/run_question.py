@@ -468,7 +468,9 @@ def main() -> None:
 
     # NLI backend
     model_dir = args.nli_model_dir or os.environ.get("SRO_NLI_MODEL_DIR", None)
-    nli = NLIBackend(model_dir=model_dir)
+    # nli = NLIBackend(model_dir=model_dir)
+    nli = NLIBackend(model_name=model_dir)
+
     t_eff = float(nli.get_temperature())
     logging.getLogger("sro.nli.backend").info("NLI temperature = %.3f (effective)", t_eff)
     rec.log("NLI_INIT", stage="S1", data={"temperature": t_eff})
