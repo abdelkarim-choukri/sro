@@ -1,0 +1,12 @@
+{"id":"qA01","q":"“Johnson & Johnson” expanded in the U.S., and shipments rose.","gold_split_points":[45],"gold_prt_spans":[[0,19],[36,40]]}
+{"id":"qA02","q":"On May 21st 2024 Apple shipped, and reviews were positive.","gold_split_points":[35],"gold_prt_spans":[[0,9],[12,16]]}
+{"id":"qA03","q":"Revenue rose from 10–12 to ≥ 15 and hit 5 %.","gold_split_points":[],"gold_prt_spans":[[18,23],[27,31],[40,43]]}
+{"id":"qA04","q":"Visit https://example.com/docs (alpha), and email ops@foo.io when ready.","gold_split_points":[43],"gold_prt_spans":[[6,30],[31,38],[50,60]]}
+{"id":"qA05","q":"Apple announced the device and the titanium frame.","gold_split_points":[],"gold_prt_spans":[]}
+{"id":"qA06","q":"Apple announced the device and reviewers reported issues.","gold_split_points":[30],"gold_prt_spans":[]}
+{"id":"qA07","q":"Apple added a fix because reviewers reported failures.","gold_split_points":[17],"gold_prt_spans":[]}
+{"id":"qA08","q":"State-of-the-art devices arrived — and engineers validated results.","gold_split_points":[],"gold_prt_spans":[[0,16],[33,34]]}
+{"id":"qA09","q":"Sales hit $ 200 and $ 300 in Q3 ’24.","gold_split_points":[],"gold_prt_spans":[[10,15],[20,25]]}
+{"id":"qA10","q":"Did Apple announce the iPhone 15 Pro, and did it ship in September, or did reviews report reduced weight?","gold_split_points":[41,70],"gold_prt_spans":[[57,67]]}
+{"id":"qA11","q":"Apple announced the device, or delayed, and quietly canceled later.","gold_split_points":[30,43],"gold_prt_spans":[]}
+{"id":"qA12","q":"Apple announced the device and is expected to ship widely.","gold_split_points":[30],"gold_prt_spans":[]}

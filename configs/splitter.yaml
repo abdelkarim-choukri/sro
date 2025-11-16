@@ -1,0 +1,17 @@
+splitter:
+  variant: L6
+  min_gap_tokens: 3
+  max_claims: 5
+  max_len_tokens: 25
+  arbitration:
+    trust_high_conf_rules: false
+    high_conf_min_side_len: 6
+  ban_pronouns: true
+  subject_clone:
+    max_prefix_tokens: 6
+  model:
+    onnx_path: artifacts/models/splitter_miniL6.int8.onnx
+    add_prob: 0.65
+    remove_margin: 0.35
+  add_prob: 0.5
+  remove_margin: 0.35

@@ -1,0 +1,7 @@
+-   repo: local
+    hooks:
+    - id: validate-splitter-fixture
+      name: validate splitter_dev.jsonl
+      entry: python scripts/validate_fixture.py tests/fixtures/splitter_dev.jsonl
+      language: system
+      pass_filenames: false

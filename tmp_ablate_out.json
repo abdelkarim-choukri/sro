@@ -1,0 +1,1 @@
+{"rules_only": {"n": 200, "force_model": true, "boundary_f1_mean": 0.2796666666666666, "prt_f1_mean": 1.0}, "hybrid_best": {"n": 200, "force_model": true, "boundary_f1_mean": 0.2796666666666666, "prt_f1_mean": 1.0}, "best_add_prob": 0.65}

@@ -1,0 +1,42 @@
+name: ONNX smoke test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  onnx-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dev requirements
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Export L6 ONNX (if HF_SNAPSHOT_DIR provided)
+        env:
+          HF_SNAPSHOT_DIR: ${{ secrets.HF_SNAPSHOT_DIR }}
+        run: |
+          ls artifacts/models || true
+          if [ -n "${HF_SNAPSHOT_DIR}" ]; then
+            echo "Found HF_SNAPSHOT_DIR, running exporter..."
+            python -m scripts.export_splitter_onnx --variant L6 \
+              --hf_model_path "${HF_SNAPSHOT_DIR}" \
+              --out_dir artifacts/models --opset 14
+          else
+            echo "HF_SNAPSHOT_DIR not set. Expecting committed artifacts in artifacts/models."
+          fi
+
+      - name: Run ONNX smoke test
+        run: |
+          pytest -q tests/test_onnx_export_smoke.py

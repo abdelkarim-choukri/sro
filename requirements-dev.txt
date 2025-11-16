@@ -1,0 +1,12 @@
+# Development / CI dependencies for ONNX export and runtime smoke tests
+# Pin to known-compatible minors where possible. Adjust as needed for your environment.
+torch>=2.0.0,<3.0.0
+transformers>=4.30.0,<5.0.0
+tokenizers>=0.13.0,<0.15.0
+# Require ONNX opset support for scaled_dot_product_attention (opset >= 14)
+onnx>=1.15.0,<2.0.0
+# ONNX Runtime for inference & quantization
+onnxruntime>=1.17.0,<2.0.0
+onnxruntime-tools>=1.8.0
+numpy>=1.24.0,<2.0.0
+pytest>=7.0.0,<8.0.0

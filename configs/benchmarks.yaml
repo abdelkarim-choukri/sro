@@ -1,0 +1,17 @@
+benchmarks:
+  break:
+    # Local BREAK high-level fixture used for CI (seeded 200-subset via scripts/make_break_subset.py)
+    dev_path: "bench/break_dev_fixture.jsonl"
+    split: "dev"
+    limit: 200          # CI cap (we calibrate gates to this subset)
+    timeout_sec: 600
+    min_gap_tokens: 3
+    gates:
+      # Calibrated to the 200-subset with seed=13 + add_prob=0.50
+      rules_only_boundary_f1_min: 0.28
+      hybrid_boundary_f1_min: 0.36
+      prt_f1_min: 0.97
+      over_rate_max: 0.20
+      under_rate_max: 0.20
+      median_time_ms_max_rules: 5.0
+      median_time_ms_max_hybrid: 12.0
